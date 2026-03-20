@@ -25,8 +25,9 @@ class ClaudeProvider(BaseLLMProvider):
             system=system,
             messages=[{"role": "user", "content": user}],
         )
+        usage_obj = getattr(msg, "usage", None)
         usage = {
-            "prompt_tokens": msg.usage.input_tokens,
-            "completion_tokens": msg.usage.output_tokens,
+            "prompt_tokens": usage_obj.input_tokens if usage_obj else 0,
+            "completion_tokens": usage_obj.output_tokens if usage_obj else 0,
         }
         return msg.content[0].text, usage

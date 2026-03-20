@@ -27,8 +27,9 @@ class ZhipuProvider(BaseLLMProvider):
                 {"role": "user", "content": user},
             ],
         )
+        usage_obj = getattr(resp, "usage", None)
         usage = {
-            "prompt_tokens": resp.usage.prompt_tokens,
-            "completion_tokens": resp.usage.completion_tokens,
+            "prompt_tokens": usage_obj.prompt_tokens if usage_obj else 0,
+            "completion_tokens": usage_obj.completion_tokens if usage_obj else 0,
         }
         return resp.choices[0].message.content, usage

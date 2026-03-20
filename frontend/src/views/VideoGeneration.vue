@@ -2,7 +2,7 @@
   <div class="page">
     <StepIndicator :current="5" />
     <div class="content">
-      <h1>分镜工作台</h1>
+      <h1>场景分镜</h1>
       <p class="subtitle">选择场景进行分镜解析和视频生成</p>
 
       <!-- 从 Step4 导入的剧本 -->
@@ -67,10 +67,21 @@
                     class="scene-checkbox"
                   />
                   <span class="scene-num">场景 {{ String(scene.scene_number).padStart(2, '0') }}</span>
+                  <button
+                    class="toggle-script-btn"
+                    :class="{ expanded: expandedScenes[`${ep.episode}-${scene.scene_number}`] }"
+                    @click.stop="toggleScriptVisibility(ep.episode, scene.scene_number)"
+                    :title="expandedScenes[`${ep.episode}-${scene.scene_number}`] ? '收起剧本' : '展开剧本'"
+                  >
+                    ▾
+                  </button>
                 </div>
 
                 <!-- 场景内容 -->
-                <div class="scene-content">
+                <div
+                  class="scene-content"
+                  :class="{ collapsed: !expandedScenes[`${ep.episode}-${scene.scene_number}`] }"
+                >
                   <div class="scene-row">
                     <span class="scene-tag">【环境】</span>
                     <span class="scene-text">{{ scene.environment }}</span>
@@ -165,8 +176,8 @@
 
       <!-- Controls -->
       <div class="controls">
-        <button @click="parseStoryboard" :disabled="isParsing || (hasStoryData && selectedCount === 0)" class="parse-btn">
-          {{ isParsing ? '解析中...' : (hasStoryData ? `开始解析 ${selectedCount} 个场景` : '开始解析分镜') }}
+        <button @click="parseStoryboard" :disabled="isParsing || (manualOverride ? !hasManualScript : (hasStoryData && selectedCount === 0))" class="parse-btn">
+          {{ isParsing ? '解析中...' : (manualOverride ? '开始解析分镜' : (hasStoryData ? `开始解析 ${selectedCount} 个场景` : '开始解析分镜')) }}
         </button>
       </div>
 
@@ -273,12 +284,14 @@ const storyStore = useStoryStore()
 
 // 场景选择相关
 const selectedScenes = ref({})
+const expandedScenes = ref({})
 const showManualInput = ref(false)
 const manualTab = ref('paste')
 const uploadedScript = ref('')
 const pastedScript = ref('')
 const isDragOver = ref(false)
 const fileInput = ref(null)
+const manualOverride = ref(false)
 
 // 解析和结果
 const isParsing = ref(false)
@@ -296,9 +309,31 @@ const progress = ref({
   percent: 0
 })
 
+// 生成唯一 ID
+function generateUniqueId() {
+  return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+// 并发限制执行器
+const MAX_CONCURRENCY = 3
+
+async function runWithConcurrency(items, fn, concurrency = MAX_CONCURRENCY) {
+  const results = []
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency)
+    const batchResults = await Promise.allSettled(batch.map(fn))
+    results.push(...batchResults)
+  }
+  return results
+}
+
 // 计算属性
 const hasStoryData = computed(() => {
   return storyStore.scenes && storyStore.scenes.length > 0
+})
+
+const hasManualScript = computed(() => {
+  return !!(pastedScript.value.trim() || uploadedScript.value.trim())
 })
 
 const selectedCount = computed(() => {
@@ -328,12 +363,22 @@ function initSelectedScenes() {
       if (selectedScenes.value[episode.episode][scene.scene_number] === undefined) {
         selectedScenes.value[episode.episode][scene.scene_number] = false
       }
+      // 默认收起所有场景的剧本
+      const key = `${episode.episode}-${scene.scene_number}`
+      if (expandedScenes.value[key] === undefined) {
+        expandedScenes.value[key] = false
+      }
     })
   })
 }
 
 function toggleScene(episodeNum, sceneNum) {
   selectedScenes.value[episodeNum][sceneNum] = !selectedScenes.value[episodeNum][sceneNum]
+}
+
+function toggleScriptVisibility(episodeNum, sceneNum) {
+  const key = `${episodeNum}-${sceneNum}`
+  expandedScenes.value[key] = !expandedScenes.value[key]
 }
 
 function toggleEpisode(episodeNum) {
@@ -383,6 +428,7 @@ function clearSelection() {
 
 function confirmManualInput() {
   showManualInput.value = false
+  manualOverride.value = true
 }
 
 // 文件上传相关
@@ -422,6 +468,11 @@ function processFile(file) {
 
 // 获取要解析的剧本
 function getScript() {
+  if (manualOverride.value) {
+    if (pastedScript.value) return pastedScript.value.trim()
+    if (uploadedScript.value) return uploadedScript.value.trim()
+    return ''
+  }
   if (hasStoryData.value) {
     return generateScriptFromSelection()
   } else if (pastedScript.value) {
@@ -485,18 +536,82 @@ async function parseStoryboard() {
   shots.value = []
   progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
+  // Mock 模式
+  if (settings.useMock) {
+    progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
+
+    await new Promise(resolve => setTimeout(resolve, 800))
+
+    const mockShots = [
+      {
+        shot_id: 'scene1_shot1',
+        visual_description_zh: '清晨的森林，阳光透过树叶洒下斑驳光影，一只小鹿在溪边饮水',
+        visual_prompt: 'A serene forest in early morning, sunlight filtering through lush green leaves creating dappled shadows on the forest floor, a young deer drinking from a crystal clear stream, mist rising, soft golden lighting, peaceful atmosphere, high detail, cinematic style',
+        camera_motion: 'Slow pan right',
+        dialogue: '在这片古老的森林里，每一天都是新的开始。',
+        estimated_duration: 4,
+        ttsLoading: false,
+        imageLoading: false,
+        videoLoading: false
+      },
+      {
+        shot_id: 'scene1_shot2',
+        visual_description_zh: '小鹿抬起头，警觉地望向远方，耳朵微微竖起',
+        visual_prompt: 'Close-up of a young deer lifting its head, alert expression, ears perked up, water droplets falling from its mouth, soft bokeh background of forest greenery, warm morning light, detailed fur texture, wildlife photography style',
+        camera_motion: 'Zoom in slowly',
+        dialogue: null,
+        estimated_duration: 3,
+        ttsLoading: false,
+        imageLoading: false,
+        videoLoading: false
+      },
+      {
+        shot_id: 'scene1_shot3',
+        visual_description_zh: '远处传来脚步声，树枝被踩断的特写',
+        visual_prompt: 'Extreme close-up of a dry twig snapping underfoot, forest floor covered with fallen autumn leaves, shallow depth of field, dramatic side lighting, tension building, cinematic thriller style',
+        camera_motion: 'Static',
+        dialogue: '沙沙的脚步声打破了森林的宁静...',
+        estimated_duration: 4,
+        ttsLoading: false,
+        imageLoading: false,
+        videoLoading: false
+      },
+      {
+        shot_id: 'scene1_shot4',
+        visual_description_zh: '一个身穿绿色斗篷的身影从树后走出，手持地图',
+        visual_prompt: 'A mysterious figure in a flowing green cloak emerging from behind an ancient oak tree, holding an old parchment map, face partially hidden in shadow, forest background with sun rays, fantasy adventure style, detailed fabric texture',
+        camera_motion: 'Medium shot, track forward',
+        dialogue: '终于找到了...传说中的精灵之泉。',
+        estimated_duration: 5,
+        ttsLoading: false,
+        imageLoading: false,
+        videoLoading: false
+      }
+    ]
+
+    progress.value = { show: true, label: '解析完成', percent: 100 }
+    shots.value = mockShots
+
+    setTimeout(() => {
+      progress.value.show = false
+    }, 500)
+
+    isParsing.value = false
+    return
+  }
+
   try {
-    const projectId = 'ui-' + Date.now()
-    const params = new URLSearchParams({ script })
+    const projectId = generateUniqueId()
 
     progress.value = { show: true, label: 'LLM 处理中，请稍候...', percent: 60 }
 
-    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/storyboard?${params}`, {
+    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/storyboard`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...getHeaders()
-      }
+      },
+      body: JSON.stringify({ script })
     })
 
     if (!res.ok) {
@@ -535,6 +650,10 @@ async function parseStoryboard() {
 }
 
 function getBackendUrl() {
+  // 开发环境使用代理，避免 CORS 问题
+  if (import.meta.env.DEV) {
+    return ''
+  }
   return settings.backendUrl || 'http://localhost:8000'
 }
 
@@ -576,7 +695,7 @@ async function generateOneTTS(shotId) {
 
   shot.ttsLoading = true
   try {
-    const res = await fetch(`${getBackendUrl()}/api/v1/tts/ui-${Date.now()}/generate`, {
+    const res = await fetch(`${getBackendUrl()}/api/v1/tts/${generateUniqueId()}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({ shots: [shot], voice: selectedVoice.value })
@@ -603,7 +722,7 @@ async function generateOneTTS(shotId) {
 
 async function generateAllTTS() {
   const shotsWithDialogue = shots.value.filter(s => s.dialogue)
-  await Promise.all(shotsWithDialogue.map(s => generateOneTTS(s.shot_id)))
+  await runWithConcurrency(shotsWithDialogue, s => generateOneTTS(s.shot_id))
 }
 
 async function generateOneImage(shotId) {
@@ -617,7 +736,7 @@ async function generateOneImage(shotId) {
 
   shot.imageLoading = true
   try {
-    const res = await fetch(`${getBackendUrl()}/api/v1/image/ui-${Date.now()}/generate`, {
+    const res = await fetch(`${getBackendUrl()}/api/v1/image/${generateUniqueId()}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({ shots: [shot] })
@@ -642,7 +761,7 @@ async function generateOneImage(shotId) {
 }
 
 async function generateAllImages() {
-  await Promise.all(shots.value.map(s => generateOneImage(s.shot_id)))
+  await runWithConcurrency(shots.value, s => generateOneImage(s.shot_id))
 }
 
 async function generateOneVideo(shotId) {
@@ -656,7 +775,7 @@ async function generateOneVideo(shotId) {
 
   shot.videoLoading = true
   try {
-    const res = await fetch(`${getBackendUrl()}/api/v1/video/ui-${Date.now()}/generate`, {
+    const res = await fetch(`${getBackendUrl()}/api/v1/video/${generateUniqueId()}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({ shots: [shot] })
@@ -682,7 +801,7 @@ async function generateOneVideo(shotId) {
 
 async function generateAllVideos() {
   const shotsWithImages = shots.value.filter(s => s.image_url)
-  await Promise.all(shotsWithImages.map(s => generateOneVideo(s.shot_id)))
+  await runWithConcurrency(shotsWithImages, s => generateOneVideo(s.shot_id))
 }
 
 onMounted(() => {
@@ -897,10 +1016,49 @@ h1 {
   color: #6c63ff;
   font-weight: 600;
   font-size: 13px;
+  flex: 1;
+}
+
+.toggle-script-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: #f0f0f0;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 12px;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.toggle-script-btn:hover {
+  background: #e0e0ff;
+  color: #6c63ff;
+}
+
+.toggle-script-btn.expanded {
+  transform: rotate(180deg);
+  background: #f0eeff;
+  color: #6c63ff;
 }
 
 .scene-content {
   padding: 0 16px 12px 42px;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+
+.scene-content.collapsed {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
 }
 
 .scene-row {

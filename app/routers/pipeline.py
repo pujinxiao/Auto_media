@@ -1,5 +1,5 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from app.schemas.pipeline import PipelineStatusResponse, PipelineStatus
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Body
+from app.schemas.pipeline import PipelineStatusResponse, PipelineStatus, StoryboardRequest
 from app.schemas.storyboard import Storyboard
 from app.services.storyboard import parse_script_to_storyboard
 
@@ -22,18 +22,20 @@ def _get_or_create(project_id: str) -> dict:
 @router.post("/{project_id}/storyboard", response_model=Storyboard)
 async def generate_storyboard(
     project_id: str,
-    script: str = Query(..., description="Markdown 格式的视听剧本"),
-    provider: str = Query(..., description="LLM provider: claude/openai/qwen/zhipu/gemini"),
-    model: str = Query(None, description="具体模型名，不填则用 provider 默认值"),
+    request: StoryboardRequest = Body(...),
 ):
     state = _get_or_create(project_id)
     state.update(status=PipelineStatus.STORYBOARD, progress=10, current_step="解析分镜中")
 
     try:
-        shots, usage = await parse_script_to_storyboard(script, provider=provider, model=model)
+        shots, usage = await parse_script_to_storyboard(
+            request.script,
+            provider=request.provider or "claude",
+            model=request.model
+        )
     except Exception as e:
         state.update(status=PipelineStatus.FAILED, error=str(e))
-        raise HTTPException(status_code=500, detail=f"分镜解析失败: {e}")
+        raise HTTPException(status_code=500, detail=f"分镜解析失败: {e}") from e
 
     state.update(progress=30, current_step="分镜解析完成")
     return Storyboard(

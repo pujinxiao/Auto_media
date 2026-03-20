@@ -2,8 +2,13 @@
   <div class="page">
     <StepIndicator :current="3" />
     <div class="content">
-      <h1>剧本生成</h1>
-      <p class="subtitle">确认大纲后开始生成完整剧本</p>
+      <div class="title-row">
+        <div>
+          <h1>剧本生成</h1>
+          <p class="subtitle">确认大纲后开始生成完整剧本</p>
+        </div>
+        <button class="chat-toggle-btn" @click="chatOpen = true">✦ AI 修改助手</button>
+      </div>
 
       <div class="top-row">
         <div class="outline-col">
@@ -51,6 +56,7 @@
     :message="keyModalMsg || '请先前往设置页填入 API Key，才能生成剧本。'"
     @close="showKeyModal = false"
   />
+  <OutlineChatPanel :show="chatOpen" @close="chatOpen = false" />
 </template>
 
 <script setup>
@@ -61,6 +67,7 @@ import OutlinePreview from '../components/OutlinePreview.vue'
 import SceneStream from '../components/SceneStream.vue'
 import CharacterGraph from '../components/CharacterGraph.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
+import OutlineChatPanel from '../components/OutlineChatPanel.vue'
 import { useStoryStore } from '../stores/story.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { streamScript } from '../api/story.js'
@@ -72,6 +79,7 @@ const started = ref(false)
 const streaming = ref(false)
 const done = ref(false)
 const error = ref('')
+const chatOpen = ref(false)
 const showKeyModal = ref(false)
 const keyModalType = ref('missing')
 const keyModalMsg = ref('')
@@ -107,11 +115,24 @@ async function startGenerate() {
 <style scoped>
 .page { min-height: 100vh; background: #f5f5f7; padding: 32px 16px; }
 .content { max-width: 900px; margin: 32px auto 0; }
+.title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
 h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
-.subtitle { color: #888; margin-bottom: 24px; }
+.subtitle { color: #888; }
+.chat-toggle-btn {
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #6c63ff, #a78bfa);
+  color: #fff;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+.chat-toggle-btn:hover { opacity: 0.9; }
 .top-row { display: flex; gap: 16px; align-items: flex-start; }
 .outline-col { flex: 1; min-width: 0; }
-.graph-col { width: 280px; flex-shrink: 0; position: sticky; top: 24px; }
+.graph-col { width: 380px; flex-shrink: 0; position: sticky; top: 24px; }
 .generate-btn {
   margin-top: 24px;
   width: 100%;

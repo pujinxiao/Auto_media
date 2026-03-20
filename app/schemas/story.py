@@ -72,6 +72,31 @@ class RefineResponse(BaseModel):
     meta_theme: Optional[str]
 
 
+class WorldBuildingStartRequest(BaseModel):
+    idea: str
+
+
+class WorldBuildingTurnRequest(BaseModel):
+    story_id: str
+    answer: str
+
+
+class WorldBuildingQuestion(BaseModel):
+    type: str          # "options" | "open"
+    text: str
+    options: Optional[List[str]]
+    dimension: str
+
+
+class WorldBuildingTurnResponse(BaseModel):
+    story_id: str
+    status: str        # "questioning" | "complete"
+    turn: int
+    question: Optional[WorldBuildingQuestion]
+    world_summary: Optional[str]
+    usage: Optional[dict]
+
+
 class AudioLine(BaseModel):
     character: str
     line: str

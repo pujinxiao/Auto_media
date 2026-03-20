@@ -15,11 +15,56 @@ function getUrl(path) {
   return `${base}/api/v1/story${path}`
 }
 
+function getPipelineUrl(path) {
+  const settings = useSettingsStore()
+  const base = settings.backendUrl ? settings.backendUrl.replace(/\/$/, '') : ''
+  return `${base}/api/v1/pipeline${path}`
+}
+
+export async function finalizeScript(storyId) {
+  const res = await fetch(getUrl(`/${storyId}/finalize`), { method: 'POST', headers: getHeaders() })
+  if (!res.ok) throw new Error(`请求失败 (${res.status})`)
+  return res.json()
+}
+
+export async function startStoryboard(storyId, script, provider) {
+  const url = getPipelineUrl(`/${storyId}/storyboard?script=${encodeURIComponent(script)}&provider=${provider}`)
+  const res = await fetch(url, { method: 'POST', headers: getHeaders() })
+  if (!res.ok) throw new Error(`请求失败 (${res.status})`)
+  return res.json()
+}
+
+export async function getPipelineStatus(storyId) {
+  const res = await fetch(getPipelineUrl(`/${storyId}/status`), { headers: getHeaders() })
+  if (!res.ok) throw new Error(`请求失败 (${res.status})`)
+  return res.json()
+}
+
 export async function analyzeIdea(idea, genre, tone) {
   const res = await fetch(getUrl('/analyze-idea'), {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ idea, genre, tone }),
+  })
+  if (!res.ok) throw new Error(`请求失败 (${res.status})`)
+  return res.json()
+}
+
+export async function worldBuildingStart(idea) {
+  const res = await fetch(getUrl('/world-building/start'), {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ idea }),
+  })
+  if (!res.ok) throw new Error(`请求失败 (${res.status})`)
+  return res.json()
+}
+
+export async function worldBuildingTurn(storyId, answer) {
+  const res = await fetch(getUrl('/world-building/turn'), {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ story_id: storyId, answer }),
   })
   if (!res.ok) throw new Error(`请求失败 (${res.status})`)
   return res.json()

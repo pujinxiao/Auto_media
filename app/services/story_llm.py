@@ -1,7 +1,8 @@
 from openai import AsyncOpenAI
 from app.services.store import save_story, get_story
-from app.services.mock_service import (
-    mock_analyze_idea, mock_generate_outline, mock_generate_script, mock_chat
+from app.services.story_mock import (
+    mock_analyze_idea, mock_generate_outline, mock_generate_script, mock_chat,
+    mock_world_building_start, mock_world_building_turn,
 )
 
 MODEL_MAP = {
@@ -108,6 +109,24 @@ REFINE_PROMPT = """你是一位资深短剧编剧。用户对故事内容进行�
 }}
 
 只返回 JSON，不要其他内容。"""
+
+
+WB_SYSTEM_PROMPT = """你是一位资深短剧编剧，正在通过提问帮助用户构建短剧世界观。
+
+规则：
+1. 每次只问一个问题，聚焦一个世界观维度
+2. 每轮必须给出 3 个选项（type 固定为 "options"），禁止使用开放式问题
+3. 选项要具体、有差异化，覆盖不同风格方向，让用户能快速做选择
+4. 世界观核心维度（按优先级）：时代背景、权力结构、主角处境、核心冲突、主要人物（数量/性格/关系）、情感基调
+5. 必须问满 6 轮，第 6 轮结束后返回 complete，不得提前结束
+6. complete 时的 world_summary 必须包含所有已收集的维度信息和人物设定
+
+严格以 JSON 返回：
+{
+  "status": "questioning" | "complete",
+  "question": { "type": "options", "text": "...", "options": ["选项A", "选项B", "选项C"], "dimension": "..." } | null,
+  "world_summary": null | "完整世界观描述，包含人物设定（仅 complete 时填写）"
+}"""
 
 
 def _make_client(api_key: str, base_url: str) -> AsyncOpenAI:
@@ -256,3 +275,64 @@ async def generate_script(story_id: str, api_key: str = "", base_url: str = "", 
             yield {"episode": ep["episode"], "title": ep["title"], "scenes": []}
 
     yield {"__usage__": {"prompt_tokens": total_prompt, "completion_tokens": total_completion}}
+
+
+async def world_building_start(idea: str, api_key: str = "", base_url: str = "", provider: str = "") -> dict:
+    import uuid
+    if not api_key:
+        return await mock_world_building_start(idea)
+
+    story_id = str(uuid.uuid4())
+    client = _make_client(api_key, base_url)
+    messages = [
+        {"role": "system", "content": WB_SYSTEM_PROMPT},
+        {"role": "user", "content": f"种子想法：{idea}，请提出第一个世界观问题"},
+    ]
+    resp = await client.chat.completions.create(
+        model=_get_model(provider),
+        messages=messages,
+    )
+    data = _parse_json(resp.choices[0].message.content)
+    messages.append({"role": "assistant", "content": resp.choices[0].message.content})
+    save_story(story_id, {"idea": idea, "wb_history": messages, "wb_turn": 1})
+    usage = resp.usage
+    return {
+        "story_id": story_id,
+        "status": data.get("status", "questioning"),
+        "turn": 1,
+        "question": data.get("question"),
+        "world_summary": data.get("world_summary"),
+        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+    }
+
+
+async def world_building_turn(story_id: str, answer: str, api_key: str = "", base_url: str = "", provider: str = "") -> dict:
+    if not api_key:
+        return await mock_world_building_turn(story_id, answer)
+
+    story = get_story(story_id)
+    history = story.get("wb_history", [])
+    turn = story.get("wb_turn", 1)
+
+    history = history + [{"role": "user", "content": answer}]
+    client = _make_client(api_key, base_url)
+    resp = await client.chat.completions.create(
+        model=_get_model(provider),
+        messages=history,
+    )
+    data = _parse_json(resp.choices[0].message.content)
+    history = history + [{"role": "assistant", "content": resp.choices[0].message.content}]
+    new_turn = turn + 1
+    updates = {"wb_history": history, "wb_turn": new_turn}
+    if data.get("status") == "complete":
+        updates["selected_setting"] = data.get("world_summary", "")
+    save_story(story_id, updates)
+    usage = resp.usage
+    return {
+        "story_id": story_id,
+        "status": data.get("status", "questioning"),
+        "turn": new_turn,
+        "question": data.get("question"),
+        "world_summary": data.get("world_summary"),
+        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+    }

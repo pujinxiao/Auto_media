@@ -15,6 +15,9 @@ export const useStoryStore = defineStore('story', {
     outline: [],
     scenes: [],
     usage: { prompt_tokens: 0, completion_tokens: 0 },
+    wbHistory: [],
+    wbTurn: 0,
+    wbCurrentQuestion: null,
   }),
   getters: {
     totalTokens: (state) => state.usage.prompt_tokens + state.usage.completion_tokens,
@@ -68,6 +71,25 @@ export const useStoryStore = defineStore('story', {
       if (usage) {
         this.usage.prompt_tokens += usage.prompt_tokens
         this.usage.completion_tokens += usage.completion_tokens
+      }
+    },
+    setWorldBuildingStart({ story_id, turn, question }) {
+      this.storyId = story_id
+      this.wbTurn = turn
+      this.wbCurrentQuestion = question
+      this.wbHistory = question ? [{ role: 'ai', text: question.text, type: question.type, options: question.options }] : []
+    },
+    appendWbTurn({ turn, question, status, world_summary, answer }) {
+      this.wbTurn = turn
+      const newHistory = [
+        ...this.wbHistory,
+        { role: 'user', text: answer },
+      ]
+      if (question) newHistory.push({ role: 'ai', text: question.text, type: question.type, options: question.options })
+      this.wbHistory = newHistory
+      this.wbCurrentQuestion = question || null
+      if (status === 'complete' && world_summary) {
+        this.selectedSetting = world_summary
       }
     },
   },

@@ -55,8 +55,8 @@ const props = defineProps({
 
 // 动态画布：人物越多越大
 const n = computed(() => props.characters.length)
-const NODE_R = computed(() => n.value <= 3 ? 34 : n.value <= 5 ? 30 : 26)
-const LAYOUT_R = computed(() => n.value <= 2 ? 80 : n.value <= 4 ? 100 : n.value <= 6 ? 115 : 130)
+const NODE_R = computed(() => n.value <= 3 ? 44 : n.value <= 5 ? 38 : 32)
+const LAYOUT_R = computed(() => n.value <= 2 ? 110 : n.value <= 4 ? 140 : n.value <= 6 ? 160 : 180)
 const W = computed(() => (LAYOUT_R.value + NODE_R.value + 20) * 2)
 const H = computed(() => W.value)
 const CX = computed(() => W.value / 2)

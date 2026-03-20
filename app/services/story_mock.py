@@ -174,3 +174,43 @@ async def mock_generate_script(story_id: str) -> AsyncGenerator[dict, None]:
     for scene in MOCK_SCENES:
         await asyncio.sleep(0.3)
         yield scene
+
+
+MOCK_WB_QUESTIONS = [
+    {"dimension": "时代背景", "text": "故事发生在什么时代背景下？", "options": ["现代都市", "古代架空王朝", "近未来赛博世界"]},
+    {"dimension": "主角处境", "text": "主角目前处于什么处境？", "options": ["身处权贵却身不由己", "落魄底层正在崛起", "隐藏身份卧薪尝胆"]},
+    {"dimension": "权力结构", "text": "这个世界的权力格局是怎样的？", "options": ["财阀垄断一切资源", "皇权与世家相互制衡", "多方势力混战割据"]},
+    {"dimension": "核心冲突", "text": "故事的核心冲突是什么？", "options": ["身份揭穿引发的危机", "复仇与救赎的对抗", "禁忌之恋与家族压力"]},
+    {"dimension": "主要人物", "text": "主要人物阵容是怎样的？", "options": ["一主一配，双强对决", "三角关系，情感纠葛", "群像叙事，多线并行"]},
+    {"dimension": "情感基调", "text": "整体情感基调偏向哪种风格？", "options": ["先虐后甜，虐心催泪", "热血爽文，燃系逆袭", "甜宠为主，轻松治愈"]},
+]
+
+
+async def mock_world_building_start(idea: str) -> dict:
+    await asyncio.sleep(0.3)
+    story_id = str(uuid.uuid4())
+    q = MOCK_WB_QUESTIONS[0]
+    question = {"type": "options", "text": q["text"], "options": q["options"], "dimension": q["dimension"]}
+    history = [
+        {"role": "user", "content": f"种子想法：{idea}，请提出第一个世界观问题"},
+        {"role": "assistant", "content": f'{{"status":"questioning","question":{{"type":"options","text":"{q["text"]}","options":{q["options"]},"dimension":"{q["dimension"]}"}},"world_summary":null}}'},
+    ]
+    save_story(story_id, {"idea": idea, "wb_history": history, "wb_turn": 1})
+    return {"story_id": story_id, "status": "questioning", "turn": 1, "question": question, "world_summary": None, "usage": None}
+
+
+async def mock_world_building_turn(story_id: str, answer: str) -> dict:
+    await asyncio.sleep(0.3)
+    story = get_story(story_id)
+    turn = story.get("wb_turn", 1)
+    new_turn = turn + 1
+
+    if turn >= 6:
+        world_summary = f"一个充满张力的短剧世界：{story.get('idea', '')}。世界观完整，人物鲜明，冲突激烈，情感基调深沉热血。"
+        save_story(story_id, {"wb_turn": new_turn, "selected_setting": world_summary})
+        return {"story_id": story_id, "status": "complete", "turn": new_turn, "question": None, "world_summary": world_summary, "usage": None}
+
+    q = MOCK_WB_QUESTIONS[turn]  # turn 从1开始，对应下一个问题
+    question = {"type": "options", "text": q["text"], "options": q["options"], "dimension": q["dimension"]}
+    save_story(story_id, {"wb_turn": new_turn})
+    return {"story_id": story_id, "status": "questioning", "turn": new_turn, "question": question, "world_summary": None, "usage": None}

@@ -1,7 +1,8 @@
 """Story 和 Pipeline 数据库操作抽象层"""
+import json as _json
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, text
 from sqlalchemy.dialects.sqlite import insert
 from app.models.story import Story, Pipeline
 from app.schemas.pipeline import PipelineStatus
@@ -106,17 +107,20 @@ async def upsert_character_images(
     """
     原子地将多个角色图片信息合并进 story.character_images。
 
-    使用 SELECT ... FOR UPDATE 锁定行后在同一事务内更新，
-    避免并发请求互相覆盖各自写入的角色图片。
+    对每个角色执行单条 UPDATE … json_set(…) 语句，直接在数据库内完成合并，
+    无需 SELECT 读取再写回，彻底消除并发更新丢失问题。
     """
-    stmt = select(Story).where(Story.id == story_id).with_for_update()
-    result = await db.execute(stmt)
-    story = result.scalar_one_or_none()
-    if story is None:
-        raise ValueError(f"Story {story_id} not found")
-    images = dict(story.character_images or {})
-    images.update(new_images)
-    story.character_images = images
+    for char_name, char_data in new_images.items():
+        result = await db.execute(
+            text(
+                "UPDATE stories "
+                "SET character_images = json_set(COALESCE(character_images, '{}'), :path, json(:value)) "
+                "WHERE id = :story_id"
+            ),
+            {"path": f'$."{char_name}"', "value": _json.dumps(char_data), "story_id": story_id},
+        )
+        if result.rowcount == 0:
+            raise ValueError(f"Story {story_id} not found")
     await db.commit()
 
 

@@ -155,14 +155,37 @@ def resolve_llm_config(header_key: str, header_base_url: str, header_provider: s
       base_url : Header X-LLM-Base-URL → .env <provider>_BASE_URL
       provider : Header X-LLM-Provider → settings.default_llm_provider
       model    : Header X-LLM-Model    → "" (后端用 MODEL_MAP 默认值)
+
+    安全规则：
+      - 若客户端提供 base_url，则必须同时提供 api_key，不使用服务端 key。
+      - 未知/自定义 provider 必须同时提供 api_key 和 base_url，不回退 anthropic 凭证。
     """
     provider = header_provider or _cfg.default_llm_provider
-    key_attr, url_attr = _PROVIDER_CONFIG.get(
-        provider,
-        ("anthropic_api_key", "anthropic_base_url"),  # 未知 provider 回退 claude
-    )
-    api_key  = header_key or getattr(_cfg, key_attr, "")
-    base_url = validate_user_base_url(header_base_url) or getattr(_cfg, url_attr, "")
+    validated_base_url = validate_user_base_url(header_base_url)
+
+    if provider not in _PROVIDER_CONFIG:
+        # 未知/自定义服务商：必须客户端自行提供全部凭证
+        if not header_key or not validated_base_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"自定义服务商 '{provider}' 必须同时提供 X-LLM-API-Key 和 X-LLM-Base-URL",
+            )
+        return {"api_key": header_key, "base_url": validated_base_url, "provider": provider, "model": header_model}
+
+    key_attr, url_attr = _PROVIDER_CONFIG[provider]
+
+    if validated_base_url:
+        # 客户端自定义 base_url：必须同时提供 key，禁止回退服务端凭证
+        if not header_key:
+            raise HTTPException(
+                status_code=400,
+                detail="使用自定义 X-LLM-Base-URL 时必须同时提供 X-LLM-API-Key",
+            )
+        return {"api_key": header_key, "base_url": validated_base_url, "provider": provider, "model": header_model}
+
+    # 未提供自定义 base_url：正常回退到服务端配置
+    api_key = header_key or getattr(_cfg, key_attr, "")
+    base_url = getattr(_cfg, url_attr, "")
     return {"api_key": api_key, "base_url": base_url, "provider": provider, "model": header_model}
 
 
@@ -174,9 +197,17 @@ def image_key_dep(request: Request) -> str:
 def image_config_dep(request: Request) -> dict:
     """Depends：提取图片生成配置（api_key / base_url），返回 dict 供 ** 解构。"""
     keys = extract_api_keys(request)
+    validated_base_url = validate_user_base_url(keys.image_base_url)
+    if validated_base_url:
+        if not keys.image_api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="使用自定义 X-Image-Base-URL 时必须同时提供 X-Image-API-Key",
+            )
+        return {"image_api_key": keys.image_api_key, "image_base_url": validated_base_url}
     return {
         "image_api_key": resolve_image_key(keys.image_api_key),
-        "image_base_url": validate_user_base_url(keys.image_base_url) or _cfg.siliconflow_base_url,
+        "image_base_url": _cfg.siliconflow_base_url,
     }
 
 
@@ -188,9 +219,17 @@ def video_key_dep(request: Request) -> str:
 def video_config_dep(request: Request) -> dict:
     """Depends：提取视频生成配置（api_key / base_url），返回 dict 供 ** 解构。"""
     keys = extract_api_keys(request)
+    validated_base_url = validate_user_base_url(keys.video_base_url)
+    if validated_base_url:
+        if not keys.video_api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="使用自定义 X-Video-Base-URL 时必须同时提供 X-Video-API-Key",
+            )
+        return {"video_api_key": keys.video_api_key, "video_base_url": validated_base_url}
     return {
         "video_api_key": resolve_video_key(keys.video_api_key),
-        "video_base_url": validate_user_base_url(keys.video_base_url) or _cfg.dashscope_base_url,
+        "video_base_url": _cfg.dashscope_base_url,
     }
 
 

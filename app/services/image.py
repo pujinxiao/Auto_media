@@ -11,6 +11,7 @@ IMAGE_DIR = Path("media/images")
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 CHARACTER_DIR = Path("media/characters")
+CHARACTER_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_MODEL = "black-forest-labs/FLUX.1-schnell"
 IMAGE_SIZE = "1280x720"

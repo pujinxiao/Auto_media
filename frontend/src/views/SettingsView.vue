@@ -51,6 +51,11 @@
           </div>
           <span class="hint">密钥仅保存在本地浏览器中</span>
         </div>
+        <div class="field">
+          <label>全局模型（可选）</label>
+          <input v-model="llmModel" placeholder="留空使用服务商默认，如 claude-3-5-sonnet-latest" />
+          <span class="hint">自定义服务商等无内置默认时，通过 X-LLM-Model 传递</span>
+        </div>
 
         <div class="divider" />
 
@@ -193,6 +198,7 @@ const backendError = ref('')
 const provider = ref(store.provider)
 const llmBaseUrl = ref(store.llmBaseUrl || PROVIDERS.find(p => p.id === store.provider)?.baseUrl || '')
 const apiKey = ref(store.apiKey)
+const llmModel = ref(store.llmModel)
 const showKey = ref(false)
 
 // 文本专用
@@ -253,6 +259,7 @@ function save() {
     provider: provider.value,
     apiKey: apiKey.value,
     llmBaseUrl: llmBaseUrl.value,
+    llmModel: llmModel.value,
     textEnabled: textEnabled.value,
     textProvider: textProvider.value,
     textApiKey: textApiKey.value,

@@ -22,6 +22,7 @@ export const useSettingsStore = defineStore('settings', {
     provider: ls('provider', 'claude'),
     apiKey: ls('apiKey'),
     llmBaseUrl: ls('llmBaseUrl'),
+    llmModel: ls('llmModel'),
 
     // 文本生成专用（开关 + Key / Base URL / 模型）
     textEnabled: ls('textEnabled') === 'true',
@@ -51,7 +52,7 @@ export const useSettingsStore = defineStore('settings', {
     effectiveLlmProvider: (state) => (state.textEnabled && state.textProvider) ? state.textProvider : state.provider,
     effectiveLlmBaseUrl:  (state) => (state.textEnabled && state.textBaseUrl)  ? state.textBaseUrl  : state.llmBaseUrl,
     effectiveLlmApiKey:   (state) => (state.textEnabled && state.textApiKey)   ? state.textApiKey   : state.apiKey,
-    effectiveLlmModel:    (state) => (state.textEnabled && state.textModel)    ? state.textModel    : '',
+    effectiveLlmModel:    (state) => (state.textEnabled && state.textModel)    ? state.textModel    : state.llmModel,
 
     // 图片生成：未启用专用配置时全部返回空，让后端读 .env SiliconFlow 默认
     effectiveImageApiKey:   (state) => (state.imageEnabled && state.imageApiKey)   ? state.imageApiKey   : '',
@@ -67,7 +68,7 @@ export const useSettingsStore = defineStore('settings', {
   actions: {
     save(data) {
       const KEYS = [
-        'backendUrl', 'provider', 'apiKey', 'llmBaseUrl',
+        'backendUrl', 'provider', 'apiKey', 'llmBaseUrl', 'llmModel',
         'textEnabled', 'textProvider', 'textApiKey', 'textBaseUrl', 'textModel',
         'imageEnabled', 'imageApiKey', 'imageBaseUrl', 'imageModel',
         'videoEnabled', 'videoApiKey', 'videoBaseUrl', 'videoModel',

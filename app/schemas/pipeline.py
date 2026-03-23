@@ -41,6 +41,7 @@ class StoryboardRequest(BaseModel):
     script: str
     provider: Optional[str] = None
     model: Optional[str] = None
+    story_id: Optional[str] = None
 
 
 class AutoGenerateRequest(BaseModel):
@@ -49,6 +50,7 @@ class AutoGenerateRequest(BaseModel):
     strategy: GenerationStrategy = GenerationStrategy.SEPARATED
     provider: str = "claude"
     model: Optional[str] = None
+    story_id: Optional[str] = None
 
     # API Keys (从前端传入)
     llm_api_key: Optional[str] = ""

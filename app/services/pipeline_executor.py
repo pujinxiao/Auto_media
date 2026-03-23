@@ -40,6 +40,7 @@ class PipelineExecutor:
         video_api_key: str = "",
         video_base_url: str = "",
         video_provider: str = "dashscope",
+        character_info: Optional[dict] = None,
     ):
         """执行完整的生成流水线"""
         self.base_url = base_url
@@ -52,7 +53,8 @@ class PipelineExecutor:
                 {"step": "storyboard", "current": 0, "total": 100, "message": "正在解析剧本..."},
             )
             self.shots, _ = await parse_script_to_storyboard(
-                script, provider, model, api_key=llm_api_key, base_url=llm_base_url
+                script, provider, model, api_key=llm_api_key, base_url=llm_base_url,
+                character_info=character_info,
             )
 
             if not self.shots:

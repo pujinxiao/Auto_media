@@ -85,6 +85,22 @@ async def auto_generate(
                 "generated_files": None,
             })
 
+            # 获取角色信息（如果提供了 story_id）
+            character_info = None
+            if req.story_id:
+                try:
+                    story = await repo.get_story(db_session, req.story_id)
+                    if story:
+                        characters = story.get("characters", [])
+                        character_images = story.get("character_images", {})
+                        if characters:
+                            character_info = {
+                                "characters": characters,
+                                "character_images": character_images or {},
+                            }
+                except Exception:
+                    pass  # 降级：无角色信息但不报错
+
             executor = PipelineExecutor(project_id, pipeline_id, db_session)
             await executor.run_full_pipeline(
                 script=req.script,
@@ -102,6 +118,7 @@ async def auto_generate(
                 video_api_key=video_api_key,
                 video_base_url=video_base_url,
                 video_provider=video_provider,
+                character_info=character_info,
             )
 
     background_tasks.add_task(_run_pipeline)
@@ -131,12 +148,29 @@ async def generate_storyboard(
     })
 
     try:
+        # 获取角色信息（如果提供了 story_id）
+        character_info = None
+        if req.story_id:
+            try:
+                story = await repo.get_story(db, req.story_id)
+                if story:
+                    characters = story.get("characters", [])
+                    character_images = story.get("character_images", {})
+                    if characters:
+                        character_info = {
+                            "characters": characters,
+                            "character_images": character_images or {},
+                        }
+            except Exception:
+                pass  # 降级：无角色信息但不报错
+
         shots, usage = await parse_script_to_storyboard(
             req.script,
             provider=provider,
             model=req.model,
             api_key=llm["api_key"],
             base_url=llm["base_url"],
+            character_info=character_info,
         )
     except Exception as e:
         await repo.save_pipeline(db, pipeline_id, project_id, {

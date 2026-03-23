@@ -132,12 +132,47 @@ async def finalize_script(story_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="剧本尚未生成，请先调用 generate-script")
 
     lines = []
+
+    # 注入角色信息
+    characters = story.get("characters", [])
+    character_images = story.get("character_images", {})
+    if characters:
+        lines.append("# 角色信息")
+        for c in characters:
+            name = c.get("name", "")
+            role = c.get("role", "")
+            desc = c.get("description", "")
+            lines.append(f"- {name}（{role}）：{desc}")
+            portrait = character_images.get(name, {}).get("portrait_prompt", "") if isinstance(character_images, dict) else ""
+            if portrait:
+                lines.append(f"  外观提示词: {portrait}")
+        lines.append("")
+
     for ep in scenes:
         lines.append(f"# 第{ep['episode']}集 {ep['title']}")
         for s in ep.get("scenes", []):
             lines.append(f"\n## 场景{s['scene_number']}")
             lines.append(f"【环境】{s['environment']}")
+            lighting = s.get("lighting")
+            if lighting:
+                lines.append(f"【光线】{lighting}")
+            mood = s.get("mood")
+            if mood:
+                lines.append(f"【氛围】{mood}")
             lines.append(f"【画面】{s['visual']}")
+            key_actions = s.get("key_actions")
+            if key_actions:
+                lines.append("【动作拆解】")
+                for action in key_actions:
+                    lines.append(f"- {action}")
+            shot_suggestions = s.get("shot_suggestions")
+            if shot_suggestions:
+                lines.append("【镜头建议】")
+                for suggestion in shot_suggestions:
+                    lines.append(f"- {suggestion}")
+            transition = s.get("transition_from_previous")
+            if transition:
+                lines.append(f"【过渡】{transition}")
             for a in s.get("audio", []):
                 lines.append(f"【{a['character']}】{a['line']}")
 

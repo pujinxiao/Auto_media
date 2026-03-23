@@ -128,9 +128,9 @@ async function confirmApply() {
       return
     }
     store.updateOutlineEpisode(
-      props.episode.episode,
-      res.title ?? props.episode.title,
-      res.summary ?? props.episode.summary
+      currentEp.episode,
+      res.title ?? currentEp.title,
+      res.summary ?? currentEp.summary
     )
     messages.value = []
     input.value = ''

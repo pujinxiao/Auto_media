@@ -60,18 +60,6 @@ def resolve_image_key(header_key: str) -> str:
     return key
 
 
-def resolve_video_key(header_key: str) -> str:
-    """
-    解析视频生成 Key：前端 header → .env DASHSCOPE_API_KEY → 400
-    """
-    key = header_key or _cfg.dashscope_api_key
-    if not key:
-        raise HTTPException(
-            status_code=400,
-            detail="视频生成 API Key 未配置，请在设置页填写或在 .env 中配置 DASHSCOPE_API_KEY",
-        )
-    return key
-
 
 def validate_user_base_url(url: str) -> str:
     """
@@ -214,9 +202,6 @@ def image_config_dep(request: Request) -> dict:
     }
 
 
-def video_key_dep(request: Request) -> str:
-    """Depends：提取并 resolve 视频生成 Key（Header → .env → HTTP 400）"""
-    return resolve_video_key(extract_api_keys(request).video_api_key)
 
 
 def video_config_dep(request: Request) -> dict:

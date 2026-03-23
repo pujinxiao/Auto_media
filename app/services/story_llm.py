@@ -1,6 +1,7 @@
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
+from fastapi import HTTPException
 from app.services import story_repository as repo
 from app.services.story_mock import (
     mock_analyze_idea, mock_generate_outline, mock_generate_script, mock_chat,
@@ -180,12 +181,14 @@ async def refine(story_id: str, change_type: str, change_summary: str, db: Async
 
     # 写回数据库，保持 DB 与前端状态同步
     updates = {}
-    if data.get("characters"):
+    if "characters" in data:
         updates["characters"] = data["characters"]
-    if data.get("relationships"):
+    if "relationships" in data:
         updates["relationships"] = data["relationships"]
-    if data.get("outline"):
+    if "outline" in data:
         updates["outline"] = data["outline"]
+    if "meta_theme" in data and data["meta_theme"]:
+        updates["meta"] = {"theme": data["meta_theme"]}
     if updates:
         await repo.save_story(db, story_id, updates)
 
@@ -375,7 +378,7 @@ async def apply_chat(story_id: str, change_type: str, chat_history: list, curren
                      all_characters: Optional[list] = None, all_outline: Optional[list] = None) -> dict:
     import json as _json
     if not api_key:
-        raise ValueError("apply_chat 需要提供 api_key")
+        raise HTTPException(status_code=400, detail="apply_chat 需要提供 api_key")
 
     client = _make_client(api_key, base_url)
     history_text = "\n".join(
@@ -413,9 +416,10 @@ async def apply_chat(story_id: str, change_type: str, chat_history: list, curren
         print(f"[APPLY_CHAT] JSON 解析失败: {e!r} | 原始响应: {resp.choices[0].message.content!r:.500}")
         return {}
 
-    # 使用前端传来的完整数组（最新状态），而非从 DB 读取（可能陈旧）
+    # 从 DB 取权威数据，避免写入客户端篡改的其他项目数据
+    story = await repo.get_story(db, story_id)
     if change_type == "character":
-        characters = list(all_characters) if all_characters else []
+        characters = list(story.get("characters") or [])
         for c in characters:
             if c.get("name") == current_item.get("name"):
                 c["description"] = data.get("description", c["description"])
@@ -423,7 +427,7 @@ async def apply_chat(story_id: str, change_type: str, chat_history: list, curren
         if characters:
             await repo.save_story(db, story_id, {"characters": characters})
     else:
-        outline = list(all_outline) if all_outline else []
+        outline = list(story.get("outline") or [])
         for ep in outline:
             if ep.get("episode") == current_item.get("episode"):
                 ep["title"] = data.get("title", ep["title"])

@@ -287,13 +287,6 @@ class PipelineExecutor:
             }
             self.results.append(result)
 
-        await self._update_state(
-            PipelineStatus.COMPLETE,
-            100,
-            f"视频生成完成 {len(video_results)} 个（含音频）",
-            {"step": "video_integrated", "current": total, "total": total, "message": "视频生成完成"},
-        )
-
     async def _stitch_videos(self):
         """使用 FFmpeg 合成音视频（仅分离式策略需要）"""
         await self._update_state(

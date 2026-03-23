@@ -53,7 +53,7 @@ const settings = useSettingsStore()
 const isMounted = ref(true)
 onUnmounted(() => { isMounted.value = false })
 
-const idea = ref('')
+const idea = ref(store.input.idea || '')
 const loading = ref(false)
 const error = ref('')
 const showGenerator = ref(false)

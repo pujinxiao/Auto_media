@@ -74,11 +74,22 @@ async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, i
 
 def _build_character_prompt(name: str, role: str, description: str) -> str:
     """Build prompt for character design image."""
+    # Map common Chinese role keywords to English visual cues for better model interpretation
+    role_lower = role.lower()
+    if any(k in role_lower for k in ("反派", "villain", "antagonist", "boss")):
+        role_cue = "villain, sinister expression, dark presence"
+    elif any(k in role_lower for k in ("主角", "protagonist", "hero", "主人公")):
+        role_cue = "protagonist, determined expression, heroic bearing"
+    elif any(k in role_lower for k in ("配角", "supporting", "助手", "sidekick")):
+        role_cue = "supporting character, approachable expression"
+    else:
+        role_cue = f"{role}"
     return (
-        f"Character portrait of {name}, role: {role}, appearance: {description}, "
-        "cinematic portrait, highly detailed, professional character design, "
-        "consistent character reference, clean background, studio lighting, "
-        "8k resolution, photorealistic"
+        f"Character portrait of {name}, {role_cue}, "
+        f"character description: {description}, "
+        "unique individual character design, distinctive appearance, "
+        "cinematic portrait, highly detailed, professional character concept art, "
+        "clean background, studio lighting, 8k resolution, photorealistic"
     )
 
 

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 
 export const useStoryStore = defineStore('story', {
+  persist: true,
   state: () => ({
     currentStep: 1,
     storyId: null,

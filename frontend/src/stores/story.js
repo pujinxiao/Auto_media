@@ -15,6 +15,7 @@ export const useStoryStore = defineStore('story', {
     relationships: [],
     outline: [],
     scenes: [],
+    shots: [],
     usage: { prompt_tokens: 0, completion_tokens: 0 },
     wbHistory: [],
     wbTurn: 0,
@@ -57,6 +58,10 @@ export const useStoryStore = defineStore('story', {
       }
     },
     resetScenes() { this.scenes = [] },
+    setShots(shots) {
+      this.shots = shots.map(s => ({ ...s, ttsLoading: false, imageLoading: false, videoLoading: false }))
+    },
+    clearShots() { this.shots = [] },
     updateOutlineEpisode(episode, title, summary) {
       const ep = this.outline.find(e => e.episode === episode)
       if (ep) { ep.title = title; ep.summary = summary }

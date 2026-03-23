@@ -246,11 +246,19 @@ async def generate_outline(story_id: str, selected_setting: str, db: AsyncSessio
 
     client = _make_client(api_key, base_url)
     prompt = OUTLINE_PROMPT.format(selected_setting=selected_setting)
-    resp = await client.chat.completions.create(
+    # Stream to prevent ReadError on slow LLM responses
+    stream = await client.chat.completions.create(
         model=_get_model(provider, model),
         messages=[{"role": "user", "content": prompt}],
+        stream=True,
     )
-    data = _parse_json(resp.choices[0].message.content)
+    chunks = []
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            chunks.append(delta)
+    content = "".join(chunks)
+    data = _parse_json(content)
     await repo.save_story(db, story_id, {
         "selected_setting": selected_setting,
         "meta": data.get("meta"),
@@ -258,11 +266,10 @@ async def generate_outline(story_id: str, selected_setting: str, db: AsyncSessio
         "relationships": data.get("relationships", []),
         "outline": data.get("outline", []),
     })
-    usage = resp.usage
     return {
         "story_id": story_id,
         **data,
-        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else None,
+        "usage": None,
     }
 
 

@@ -116,10 +116,6 @@ export const useStoryStore = defineStore('story', {
       }
     },
     setWorldBuildingStart({ story_id, turn, question, usage }) {
-      this.storyId = story_id
-      this.wbTurn = turn
-      this.wbCurrentQuestion = question
-      this.wbHistory = question ? [{ role: 'ai', text: question.text, type: question.type, options: question.options }] : []
       // Only wipe story data when the story_id has actually changed
       if (story_id !== this.storyId) {
         this.meta = null
@@ -131,6 +127,10 @@ export const useStoryStore = defineStore('story', {
         this.step3Done = false
         this.selectedSetting = ''
       }
+      this.storyId = story_id
+      this.wbTurn = turn
+      this.wbCurrentQuestion = question
+      this.wbHistory = question ? [{ role: 'ai', text: question.text, type: question.type, options: question.options }] : []
       if (usage) {
         this.usage.prompt_tokens += usage.prompt_tokens
         this.usage.completion_tokens += usage.completion_tokens

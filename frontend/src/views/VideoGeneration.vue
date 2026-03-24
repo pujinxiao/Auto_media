@@ -762,7 +762,7 @@ async function generateOneTTS(shotId) {
   // Edge TTS 不需要 API Key，无需守卫
 
   const shot = shots.value.find(s => s.shot_id === shotId)
-  if (!shot || !(shot.audio_reference?.content || shot.dialogue)) return
+  if (!shot || !(shot.audio_reference?.content || shot.dialogue) || shot.audio_reference?.type === 'sfx') return
 
   shot.ttsLoading = true
   try {

@@ -76,9 +76,9 @@
         </div>
         <div v-if="showAdvanced" class="advanced-section">
           <div class="adv-row">
-            <span class="adv-label">分镜专用配置</span>
+            <span id="use-script-model-label" class="adv-label">分镜专用配置</span>
             <label class="toggle-switch">
-              <input type="checkbox" v-model="useScriptModel" @change="onScriptModelToggle" />
+              <input type="checkbox" v-model="useScriptModel" @change="onScriptModelToggle" aria-labelledby="use-script-model-label" />
               <span class="toggle-track" />
             </label>
           </div>
@@ -267,8 +267,8 @@ function onScriptProviderChange() {
 
 function onScriptModelToggle() {
   if (!useScriptModel.value) {
-    scriptProvider.value    = store.llmProvider || 'claude'
-    scriptBaseUrl.value     = ''
+    scriptProvider.value    = llmProvider.value
+    scriptBaseUrl.value     = llmBaseUrl.value
     scriptApiKey.value      = ''
     scriptModelSelect.value = currentScriptModels.value[0]?.id ?? 'custom'
     scriptModelCustom.value = ''
@@ -492,4 +492,5 @@ input:focus { border-color: #6c63ff; }
 }
 .toggle-switch input:checked + .toggle-track { background: #6c63ff; }
 .toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
+.toggle-switch input:focus-visible + .toggle-track { outline: 2px solid #6c63ff; outline-offset: 2px; }
 </style>

@@ -7,6 +7,7 @@ PROVIDER_MODELS = {
     "qwen":   ["qwen-plus", "qwen-max", "qwen-turbo"],
     "zhipu":  ["glm-4", "glm-4-flash", "glm-3-turbo"],
     "gemini": ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-flash"],
+    "siliconflow": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct", "THUDM/glm-4-9b-chat"],
 }
 
 
@@ -20,7 +21,7 @@ def get_llm_provider(
     Get LLM provider instance.
 
     Args:
-        provider: Provider name (claude, openai, qwen, zhipu, gemini)
+        provider: Provider name (claude, openai, qwen, zhipu, gemini, siliconflow)
         model: Model name (optional, will use default if not provided)
         api_key: API key (optional, will use settings if not provided)
         base_url: Base URL (optional, will use settings if not provided)
@@ -68,6 +69,15 @@ def get_llm_provider(
         return GeminiProvider(
             api_key=api_key or settings.gemini_api_key,
             base_url=base_url or settings.gemini_base_url,
+            model=resolved_model
+        )
+
+    if name == "siliconflow":
+        # SiliconFlow uses OpenAI-compatible API
+        from app.services.llm.openai import OpenAIProvider
+        return OpenAIProvider(
+            api_key=api_key or settings.siliconflow_api_key,
+            base_url=base_url or settings.siliconflow_base_url,
             model=resolved_model
         )
 

@@ -67,7 +67,7 @@ async def parse_script_to_storyboard(
 
     Args:
         script: The script text to parse
-        provider: LLM provider name (claude, openai, qwen, zhipu, gemini)
+        provider: LLM provider name (claude, openai, qwen, zhipu, gemini, siliconflow)
         model: Model name (optional)
         api_key: API key for the provider (optional, will use settings if not provided)
         base_url: Base URL for the provider (optional, will use settings if not provided)

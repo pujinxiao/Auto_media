@@ -84,7 +84,7 @@ async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, i
     """Generate images for all shots concurrently."""
     def _prompt(shot: dict) -> str:
         p = shot.get("visual_prompt") or shot.get("final_video_prompt", "")
-        if not p:
+        if not p or not p.strip():
             raise ValueError(f"shot {shot.get('shot_id', '?')} has no visual_prompt / final_video_prompt")
         return p
 

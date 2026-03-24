@@ -595,7 +595,7 @@ async function parseStoryboard() {
         shot_id: 'scene1_shot2',
         storyboard_description: '小鹿抬起头，警觉地望向远方，耳朵微微竖起',
         final_video_prompt: 'Close-up, Eye-level, Zoom in slowly. A young spotted deer lifting its head alertly, ears perked up, water droplets falling from its mouth, soft bokeh forest greenery background. Warm morning light, detailed fur texture. Cinematic, 4k resolution, photorealistic, --ar 16:9',
-        camera_setup: { shot_size: 'CU', camera_angle: 'Eye-level', movement: 'Zoom in slowly' },
+        camera_setup: { shot_size: 'CU', camera_angle: 'Eye-level', movement: 'Slow Dolly in' },
         visual_elements: { subject_and_clothing: 'Young spotted deer, detailed fur', action_and_expression: 'Lifting head alertly, ears perked, water drops from mouth', environment_and_props: 'Soft bokeh forest greenery background', lighting_and_color: 'Warm morning light, soft fill' },
         audio_reference: { type: null, content: null },
         scene_intensity: 'low',
@@ -625,7 +625,7 @@ async function parseStoryboard() {
         shot_id: 'scene1_shot4',
         storyboard_description: '一个身穿绿色斗篷的身影从树后走出，手持地图',
         final_video_prompt: 'Medium Shot, Eye-level, Dolly forward. A mysterious figure in a flowing dark green wool cloak emerging from behind an ancient oak tree, holding an old parchment map, face partially hidden in deep shadow. Forest background with volumetric sun rays. Rim lighting on cloak edges, warm golden tones. Cinematic, 4k resolution, photorealistic, --ar 16:9',
-        camera_setup: { shot_size: 'MS', camera_angle: 'Eye-level', movement: 'Dolly forward' },
+        camera_setup: { shot_size: 'MS', camera_angle: 'Eye-level', movement: 'Slow Dolly in' },
         visual_elements: { subject_and_clothing: 'Mysterious figure, dark green wool cloak, old parchment map', action_and_expression: 'Emerging from behind tree, face hidden in shadow', environment_and_props: 'Ancient oak tree, forest with sun rays', lighting_and_color: 'Volumetric god rays, rim lighting on cloak, warm golden tones' },
         audio_reference: { type: 'dialogue', content: '终于找到了...传说中的精灵之泉。' },
         scene_intensity: 'low',
@@ -796,7 +796,7 @@ async function generateOneTTS(shotId) {
 }
 
 async function generateAllTTS() {
-  const shotsWithDialogue = shots.value.filter(s => s.audio_reference?.content || s.dialogue)
+  const shotsWithDialogue = shots.value.filter(s => (s.audio_reference?.content || s.dialogue) && s.audio_reference?.type !== 'sfx')
   isGenerating.value = true
   try {
     await runWithConcurrency(shotsWithDialogue, s => generateOneTTS(s.shot_id))

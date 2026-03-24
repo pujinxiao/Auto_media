@@ -343,7 +343,7 @@ Shows how to handle state progression with smooth transitions AND correct dialog
   "storyboard_description": "李明被老板当众羞辱后，身体僵住。突然，他缓缓抬起头，瞳孔剧烈收缩，眼神中闪现出决然。额头渗出冷汗，左眼角跳动。在这一刻，系统觉醒的蓝色光芒映照在他黑色瞳孔深处，像一道闪电划过绝望的黑夜。这是命运转折的临界点。",
   "camera_setup": {
     "shot_size": "ECU",
-    "camera_angle": "Slightly low angle",
+    "camera_angle": "Low angle",
     "movement": "Slow Dolly in"
   },
   "visual_elements": {
@@ -447,13 +447,13 @@ USER_TEMPLATE = """Convert this Audio-Visual Script into physically-precise stor
   4. scene_intensity ("low" or "high")
   5. estimated_duration (match dialogue length 4-5s or action pacing 3-4s)
   6. audio_reference (type + content from the dialogue list, OR null if silent)
-  7. final_video_prompt (assemble using mandatory formula, ALWAYS include continuity phrase referencing previous shot)
+  7. final_video_prompt (assemble using mandatory formula; include continuity phrase referencing previous shot — skip for the very first shot of each scene)
 - STEP 4: Review for continuity and dialogue correctness:
-  - [ ] Each shot references what happens in the previous shot
+  - [ ] Each shot (except scene openers) references what happens in the previous shot
   - [ ] Camera reframing is smooth (no jarring cuts between very different perspectives)
   - [ ] Character positions/states are consistent (sitting→sitting, standing→standing unless they moved)
   - [ ] Transition shots are inserted when needed
-  - [ ] All final_video_prompts contain continuity keywords
+  - [ ] All final_video_prompts (except scene openers) contain continuity keywords
   - [ ] **CRITICAL: Count dialogue/narration lines in script. Count audio_reference entries with type "dialogue" or "narration" in shots (exclude sfx). They must match exactly.**
   - [ ] **CRITICAL: No dialogue line appears in more than one shot.**
   - [ ] Each dialogue's audio_reference.content is unique (no repetition).

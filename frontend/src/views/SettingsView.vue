@@ -68,6 +68,54 @@
             style="margin-top:6px"
           />
         </div>
+
+        <!-- 高级选项 -->
+        <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+          <span class="advanced-arrow" :class="{ open: showAdvanced }">▶</span>
+          高级选项
+        </div>
+        <div v-if="showAdvanced" class="advanced-section">
+          <div class="adv-row">
+            <span class="adv-label">分镜专用配置</span>
+            <label class="toggle-switch">
+              <input type="checkbox" v-model="useScriptModel" @change="onScriptModelToggle" />
+              <span class="toggle-track" />
+            </label>
+          </div>
+          <span class="hint">启用后，分镜生成步骤将使用下方独立配置（服务商 / API Key / 模型），其余步骤仍使用上方默认 LLM 配置。</span>
+          <template v-if="useScriptModel">
+            <div class="field" style="margin-top:12px; margin-bottom:0">
+              <label>服务商</label>
+              <select v-model="scriptProvider" @change="onScriptProviderChange" class="select-input">
+                <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
+              </select>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label>Base URL</label>
+              <input v-model="scriptBaseUrl" placeholder="https://api.example.com/v1" />
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label>API Key</label>
+              <div class="input-row">
+                <input v-model="scriptApiKey" :type="showScriptKey ? 'text' : 'password'" placeholder="sk-..." />
+                <button class="toggle-btn" @click="showScriptKey = !showScriptKey">{{ showScriptKey ? '隐藏' : '显示' }}</button>
+              </div>
+              <span class="hint">密钥仅保存在本地浏览器中</span>
+            </div>
+            <div class="field" style="margin-bottom:0">
+              <label>模型</label>
+              <select v-model="scriptModelSelect" class="select-input">
+                <option v-for="m in currentScriptModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+              </select>
+              <input
+                v-if="scriptModelSelect === 'custom'"
+                v-model="scriptModelCustom"
+                placeholder="输入模型名称，如 claude-opus-4-6"
+                style="margin-top:6px"
+              />
+            </div>
+          </template>
+        </div>
       </div>
 
       <!-- 图片生成 -->
@@ -189,6 +237,44 @@ const { select: _ls, custom: _lc } = _initLlmModel()
 const llmModelSelect = ref(_ls)
 const llmModelCustom = ref(_lc)
 
+// 高级选项：脚本生成专用配置
+const _hasScript = !!(store.scriptModel || store.scriptApiKey || store.scriptBaseUrl || store.scriptProvider)
+const showAdvanced   = ref(_hasScript)
+const useScriptModel = ref(_hasScript)
+const scriptProvider = ref(store.scriptProvider || store.llmProvider || 'claude')
+const scriptBaseUrl  = ref(store.scriptBaseUrl  || LLM_PROVIDERS.find(p => p.id === (store.scriptProvider || store.llmProvider || 'claude'))?.baseUrl || '')
+const scriptApiKey   = ref(store.scriptApiKey)
+const showScriptKey  = ref(false)
+
+const currentScriptModels = computed(() =>
+  LLM_PROVIDERS.find(p => p.id === scriptProvider.value)?.models ?? [{ id: 'custom', label: '自定义...' }]
+)
+const _initScriptModel = () => {
+  const stored = store.scriptModel
+  const isPreset = !!stored && currentScriptModels.value.some(m => m.id !== 'custom' && m.id === stored)
+  return { select: isPreset ? stored : (stored ? 'custom' : currentScriptModels.value[0]?.id ?? 'custom'), custom: isPreset ? '' : (stored || '') }
+}
+const { select: _ss, custom: _sc } = _initScriptModel()
+const scriptModelSelect = ref(_ss)
+const scriptModelCustom = ref(_sc)
+
+function onScriptProviderChange() {
+  const p = LLM_PROVIDERS.find(p => p.id === scriptProvider.value)
+  if (p && p.id !== 'custom') scriptBaseUrl.value = p.baseUrl
+  scriptModelSelect.value = currentScriptModels.value[0]?.id ?? 'custom'
+  scriptModelCustom.value = ''
+}
+
+function onScriptModelToggle() {
+  if (!useScriptModel.value) {
+    scriptProvider.value    = store.llmProvider || 'claude'
+    scriptBaseUrl.value     = ''
+    scriptApiKey.value      = ''
+    scriptModelSelect.value = currentScriptModels.value[0]?.id ?? 'custom'
+    scriptModelCustom.value = ''
+  }
+}
+
 // Image
 const imageProvider = ref(store.imageProvider || 'siliconflow')
 const imageBaseUrl  = ref(store.imageBaseUrl  || IMAGE_PROVIDERS.find(p => p.id === (store.imageProvider || 'siliconflow'))?.baseUrl || '')
@@ -268,20 +354,27 @@ async function testBackend() {
 const getModel = (select, custom) => select === 'custom' ? custom : select
 
 function save() {
+  const scriptModelValue = useScriptModel.value
+    ? getModel(scriptModelSelect.value, scriptModelCustom.value)
+    : ''
   store.save({
-    backendUrl:    backendUrl.value,
-    llmProvider:   llmProvider.value,
-    llmApiKey:     llmApiKey.value,
-    llmBaseUrl:    llmBaseUrl.value,
-    llmModel:      getModel(llmModelSelect.value, llmModelCustom.value),
-    imageProvider: imageProvider.value,
-    imageApiKey:   imageApiKey.value,
-    imageBaseUrl:  imageBaseUrl.value,
-    imageModel:    getModel(imageModelSelect.value, imageModelCustom.value),
-    videoProvider: videoProvider.value,
-    videoApiKey:   videoApiKey.value,
-    videoBaseUrl:  videoBaseUrl.value,
-    videoModel:    getModel(videoModelSelect.value, videoModelCustom.value),
+    backendUrl:     backendUrl.value,
+    llmProvider:    llmProvider.value,
+    llmApiKey:      llmApiKey.value,
+    llmBaseUrl:     llmBaseUrl.value,
+    llmModel:       getModel(llmModelSelect.value, llmModelCustom.value),
+    scriptModel:    scriptModelValue,
+    scriptProvider: useScriptModel.value ? scriptProvider.value : '',
+    scriptApiKey:   useScriptModel.value ? scriptApiKey.value   : '',
+    scriptBaseUrl:  useScriptModel.value ? scriptBaseUrl.value  : '',
+    imageProvider:  imageProvider.value,
+    imageApiKey:    imageApiKey.value,
+    imageBaseUrl:   imageBaseUrl.value,
+    imageModel:     getModel(imageModelSelect.value, imageModelCustom.value),
+    videoProvider:  videoProvider.value,
+    videoApiKey:    videoApiKey.value,
+    videoBaseUrl:   videoBaseUrl.value,
+    videoModel:     getModel(videoModelSelect.value, videoModelCustom.value),
   })
   saved.value = true
   setTimeout(() => { saved.value = false }, 2000)
@@ -345,6 +438,7 @@ input {
 }
 input:focus { border-color: #6c63ff; }
 .hint { font-size: 12px; color: #aaa; }
+.hint-inline { font-size: 11px; color: #bbb; font-weight: 400; }
 .status-ok { font-size: 12px; color: #4caf50; font-weight: 600; }
 .status-fail { font-size: 12px; color: #e53935; }
 
@@ -365,4 +459,37 @@ input:focus { border-color: #6c63ff; }
 }
 .save-btn:hover { opacity: 0.9; }
 .saved-tip { text-align: center; color: #4caf50; font-size: 14px; font-weight: 600; }
+
+/* 高级选项 */
+.advanced-toggle {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 4px; padding: 6px 0; cursor: pointer;
+  font-size: 12px; color: #888; user-select: none;
+  border-top: 1px dashed #eee;
+}
+.advanced-toggle:hover { color: #6c63ff; }
+.advanced-arrow { font-size: 10px; transition: transform 0.2s; display: inline-block; }
+.advanced-arrow.open { transform: rotate(90deg); }
+.advanced-section {
+  margin-top: 12px; padding: 14px 16px; background: #f8f7ff;
+  border-radius: 10px; border: 1px solid #ede9ff;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.adv-row { display: flex; align-items: center; justify-content: space-between; }
+.adv-label { font-size: 13px; font-weight: 600; color: #555; }
+
+/* Toggle switch */
+.toggle-switch { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-track {
+  position: absolute; inset: 0; border-radius: 22px;
+  background: #d1d5db; cursor: pointer; transition: background 0.2s;
+}
+.toggle-track::before {
+  content: ''; position: absolute;
+  width: 16px; height: 16px; left: 3px; bottom: 3px;
+  border-radius: 50%; background: #fff; transition: transform 0.2s;
+}
+.toggle-switch input:checked + .toggle-track { background: #6c63ff; }
+.toggle-switch input:checked + .toggle-track::before { transform: translateX(16px); }
 </style>

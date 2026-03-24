@@ -171,6 +171,10 @@ export const useSettingsStore = defineStore('settings', {
     llmApiKey:     ls('llmApiKey'),
     llmBaseUrl:    ls('llmBaseUrl'),
     llmModel:      ls('llmModel'),
+    scriptModel:    ls('scriptModel'),
+    scriptProvider: ls('scriptProvider'),
+    scriptApiKey:   ls('scriptApiKey'),
+    scriptBaseUrl:  ls('scriptBaseUrl'),
     imageProvider: ls('imageProvider', 'siliconflow'),
     imageApiKey:   ls('imageApiKey'),
     imageBaseUrl:  ls('imageBaseUrl'),
@@ -184,10 +188,14 @@ export const useSettingsStore = defineStore('settings', {
   getters: {
     useMock: (state) => MOCK_ENABLED && !state.llmApiKey,
 
-    effectiveLlmProvider: (state) => state.llmProvider,
-    effectiveLlmBaseUrl:  (state) => state.llmBaseUrl,
-    effectiveLlmApiKey:   (state) => state.llmApiKey,
-    effectiveLlmModel:    (state) => state.llmModel,
+    effectiveLlmProvider:  (state) => state.llmProvider,
+    effectiveLlmBaseUrl:   (state) => state.llmBaseUrl,
+    effectiveLlmApiKey:    (state) => state.llmApiKey,
+    effectiveLlmModel:     (state) => state.llmModel,
+    effectiveScriptModel:   (state) => state.scriptModel,
+    effectiveScriptProvider:(state) => state.scriptProvider,
+    effectiveScriptApiKey:  (state) => state.scriptApiKey,
+    effectiveScriptBaseUrl: (state) => state.scriptBaseUrl,
 
     effectiveImageApiKey:  (state) => state.imageApiKey,
     effectiveImageBaseUrl: (state) => state.imageBaseUrl,
@@ -204,6 +212,7 @@ export const useSettingsStore = defineStore('settings', {
       const KEYS = [
         'backendUrl',
         'llmProvider', 'llmApiKey', 'llmBaseUrl', 'llmModel',
+        'scriptModel', 'scriptProvider', 'scriptApiKey', 'scriptBaseUrl',
         'imageProvider', 'imageApiKey', 'imageBaseUrl', 'imageModel',
         'videoProvider', 'videoApiKey', 'videoBaseUrl', 'videoModel',
       ]

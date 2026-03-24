@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Body, Depe
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.config import settings as _cfg
-from app.core.api_keys import extract_api_keys, resolve_image_key, image_config_dep, video_config_dep, llm_config_dep, validate_user_base_url
+from app.core.api_keys import extract_api_keys, resolve_image_key, image_config_dep, video_config_dep, llm_config_dep, validate_user_base_url, resolve_llm_config
 from app.schemas.pipeline import (
     PipelineStatusResponse,
     PipelineStatus,
@@ -133,13 +133,26 @@ async def auto_generate(
 @router.post("/{project_id}/storyboard", response_model=Storyboard)
 async def generate_storyboard(
     project_id: str,
+    request: Request,
     req: StoryboardRequest = Body(...),
     llm: dict = Depends(llm_config_dep),
     db: AsyncSession = Depends(get_db),
 ):
     """手动触发：分镜解析"""
     pipeline_id = str(uuid4())
-    provider = llm["provider"] or req.provider or "claude"
+
+    # 读取分镜专用配置（X-Script-* headers）
+    s_provider = request.headers.get("X-Script-Provider", "")
+    s_api_key  = request.headers.get("X-Script-API-Key",  "")
+    s_base_url = request.headers.get("X-Script-Base-URL", "")
+    s_model    = request.headers.get("X-Script-Model",    "")
+
+    if s_provider or s_api_key or s_base_url or s_model:
+        script_llm = resolve_llm_config(s_api_key, s_base_url, s_provider, s_model)
+    else:
+        script_llm = llm
+
+    provider = script_llm["provider"] or req.provider or "claude"
 
     await repo.save_pipeline(db, pipeline_id, project_id, {
         "status": PipelineStatus.STORYBOARD,
@@ -167,9 +180,9 @@ async def generate_storyboard(
         shots, usage = await parse_script_to_storyboard(
             req.script,
             provider=provider,
-            model=req.model,
-            api_key=llm["api_key"],
-            base_url=llm["base_url"],
+            model=script_llm["model"] or req.model,
+            api_key=script_llm["api_key"],
+            base_url=script_llm["base_url"],
             character_info=character_info,
         )
     except Exception as e:

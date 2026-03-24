@@ -705,9 +705,13 @@ function getMediaUrl(path) {
 
 function getHeaders() {
   const headers = {}
-  if (settings.effectiveLlmApiKey)   headers['X-LLM-API-Key']   = settings.effectiveLlmApiKey
-  if (settings.effectiveLlmBaseUrl)  headers['X-LLM-Base-URL']  = settings.effectiveLlmBaseUrl
-  if (settings.effectiveLlmProvider) headers['X-LLM-Provider']  = settings.effectiveLlmProvider
+  if (settings.effectiveLlmApiKey)    headers['X-LLM-API-Key']    = settings.effectiveLlmApiKey
+  if (settings.effectiveLlmBaseUrl)   headers['X-LLM-Base-URL']   = settings.effectiveLlmBaseUrl
+  if (settings.effectiveLlmProvider)  headers['X-LLM-Provider']   = settings.effectiveLlmProvider
+  if (settings.effectiveScriptModel)    headers['X-Script-Model']    = settings.effectiveScriptModel
+  if (settings.effectiveScriptProvider) headers['X-Script-Provider'] = settings.effectiveScriptProvider
+  if (settings.effectiveScriptApiKey)   headers['X-Script-API-Key']  = settings.effectiveScriptApiKey
+  if (settings.effectiveScriptBaseUrl)  headers['X-Script-Base-URL'] = settings.effectiveScriptBaseUrl
   if (settings.effectiveImageApiKey)  headers['X-Image-API-Key']  = settings.effectiveImageApiKey
   if (settings.effectiveImageBaseUrl) headers['X-Image-Base-URL'] = settings.effectiveImageBaseUrl
   if (settings.effectiveVideoApiKey)    headers['X-Video-API-Key']    = settings.effectiveVideoApiKey

@@ -1,12 +1,12 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.schemas.story import AnalyzeIdeaRequest, GenerateOutlineRequest, GenerateScriptRequest, ChatRequest, RefineRequest, WorldBuildingStartRequest, WorldBuildingTurnRequest, PatchStoryRequest, ApplyChatRequest
 from app.services.story_llm import analyze_idea, generate_outline, generate_script, chat, refine, world_building_start, world_building_turn, apply_chat
 from app.services import story_repository as repo
-from app.core.api_keys import llm_config_dep
+from app.core.api_keys import llm_config_dep, resolve_llm_config
 
 router = APIRouter(prefix="/api/v1/story", tags=["story"])
 
@@ -70,11 +70,21 @@ async def api_chat(req: ChatRequest, llm: dict = Depends(llm_config_dep), db: As
 
 
 @router.post("/generate-script")
-async def api_generate_script(req: GenerateScriptRequest, llm: dict = Depends(llm_config_dep), db: AsyncSession = Depends(get_db)):
+async def api_generate_script(req: GenerateScriptRequest, request: Request, llm: dict = Depends(llm_config_dep), db: AsyncSession = Depends(get_db)):
+    s_provider = request.headers.get("X-Script-Provider", "")
+    s_api_key  = request.headers.get("X-Script-API-Key",  "")
+    s_base_url = request.headers.get("X-Script-Base-URL", "")
+    s_model    = request.headers.get("X-Script-Model",    "")
+
+    if s_provider or s_api_key or s_base_url or s_model:
+        script_llm = resolve_llm_config(s_api_key, s_base_url, s_provider, s_model)
+    else:
+        script_llm = llm
+
     async def event_stream():
         scenes = []
         try:
-            async for scene in generate_script(req.story_id, db=db, **llm):
+            async for scene in generate_script(req.story_id, db=db, **script_llm):
                 if "__usage__" not in scene:
                     scenes.append(scene)
                     yield f"data: {json.dumps(scene, ensure_ascii=False)}\n\n"

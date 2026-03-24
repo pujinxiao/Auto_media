@@ -200,10 +200,15 @@ def build_apply_chat_prompt(change_type: str, current_item: dict, history_text: 
             history_text=history_text,
             current_item_json=current_item_json,
         )
-    else:
+    elif change_type == "episode":
         return _APPLY_CHAT_EPISODE_TEMPLATE.format(
             episode=current_item.get("episode", ""),
             title=current_item.get("title", ""),
             history_text=history_text,
             current_item_json=current_item_json,
+        )
+    else:
+        raise ValueError(
+            f"build_apply_chat_prompt: unknown change_type {change_type!r}; "
+            "expected 'character' or 'episode'"
         )

@@ -11,6 +11,8 @@ from typing import Optional
 
 def build_character_prompt(name: str, role: str, description: str) -> str:
     """构建角色设计图生成 prompt（含 role 自动映射）。"""
+    role = role or ""
+    description = description or ""
     role_lower = role.lower()
     if any(k in role_lower for k in ("反派", "villain", "antagonist", "boss")):
         role_cue = "villain, sinister expression, dark presence"
@@ -48,7 +50,10 @@ def build_character_section(character_info: Optional[dict]) -> str:
         role = c.get("role", "")
         desc = c.get("description", "")
         lines.append(f"- **{name}**（{role}）：{desc}")
-        portrait = character_images.get(name, {}).get("portrait_prompt", "") if isinstance(character_images, dict) else ""
+        portrait = (
+            character_images.get(name, {}).get("portrait_prompt")
+            or character_images.get(name, {}).get("prompt", "")
+        ) if isinstance(character_images, dict) else ""
         if portrait:
             lines.append(f"  Portrait prompt: {portrait}")
     return "\n".join(lines)

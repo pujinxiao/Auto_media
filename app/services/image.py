@@ -82,7 +82,7 @@ async def generate_image(visual_prompt: str, shot_id: str, model: str = DEFAULT_
 
 async def generate_images_batch(shots: list[dict], model: str = DEFAULT_MODEL, image_api_key: str = "", image_base_url: str = "") -> list[dict]:
     """Generate images for all shots concurrently."""
-    tasks = [generate_image(shot["visual_prompt"], shot["shot_id"], model, image_api_key, image_base_url) for shot in shots]
+    tasks = [generate_image(shot.get("visual_prompt") or shot.get("final_video_prompt", ""), shot["shot_id"], model, image_api_key, image_base_url) for shot in shots]
     return list(await asyncio.gather(*tasks))
 
 

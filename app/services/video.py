@@ -62,7 +62,7 @@ async def generate_videos_batch(
     tasks = [
         generate_video(
             image_url=f"{base_url}{shot['image_url']}",
-            prompt=f"{shot['visual_prompt']} {shot['camera_motion']}",
+            prompt=f"{shot.get('visual_prompt') or shot.get('final_video_prompt', '')} {shot.get('camera_motion') or shot.get('camera_setup', {}).get('movement', '')}".strip(),
             shot_id=shot["shot_id"],
             model=model,
             video_api_key=video_api_key,

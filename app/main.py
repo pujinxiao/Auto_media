@@ -11,10 +11,6 @@ from app.routers import projects, pipeline, tts, image, video, story, character
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    Path("media/audio").mkdir(parents=True, exist_ok=True)
-    Path("media/images").mkdir(parents=True, exist_ok=True)
-    Path("media/videos").mkdir(parents=True, exist_ok=True)
-    Path("media/characters").mkdir(parents=True, exist_ok=True)
     yield
 
 

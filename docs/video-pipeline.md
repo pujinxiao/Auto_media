@@ -3,6 +3,8 @@
 > 后端处理逻辑：从分镜 JSON 到视频成片的质量控制链路
 > 提示词模板详见 [prompt-framework.md](prompt-framework.md)
 > 更新日期：2026-03-25
+>
+> 状态说明：当前主链路已经落地 `StoryContext` + `build_generation_payload()`，统一组装 `image_prompt` / `final_video_prompt` / `last_frame_prompt` / `negative_prompt`。本文后半段关于 DSPy、VLM 反馈闭环、起始帧策略增强等内容仍属于规划，不应视为现网默认能力。
 
 ---
 
@@ -85,6 +87,8 @@ VISUAL_DNA_PROMPT = """从以下角色描述中，提取一段固定的英文外
 ```
 
 **方式 B**：人工编写后存入 `character_images[name]["visual_dna"]`
+
+> 实现说明：运行期当前优先读取 `Story.meta["character_appearance_cache"]`，`character_images[name]["visual_dna"]` 仅作为兼容投影字段保留。
 
 ---
 

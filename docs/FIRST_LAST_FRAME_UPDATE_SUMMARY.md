@@ -49,7 +49,7 @@
   - 对过渡分镜方案的影响
 
 #### ✅ 测试脚本
-- 文件：`tests/test_doubao_first_last_frame.py`
+- 文件：`scripts/manual/test_doubao_first_last_frame.py`
 - 测试场景：
   1. 单帧 I2V（基准测试）
   2. 双帧过渡（站立→坐下）
@@ -98,7 +98,7 @@ result = await generate_video(
 1. 配置API密钥（在测试脚本中）
 2. 运行测试：
    ```bash
-   python tests/test_doubao_first_last_frame.py
+   python scripts/manual/test_doubao_first_last_frame.py
    ```
 3. 对比单帧 vs 双帧的质量差异
 4. 评估是否达到预期
@@ -184,7 +184,7 @@ Prompt: "从站立到坐下"（只需要描述动作）
 ```bash
 # 1. 在测试脚本中配置API密钥
 # 2. 运行测试
-python tests/test_doubao_first_last_frame.py
+python scripts/manual/test_doubao_first_last_frame.py
 ```
 
 **B. 更新受影响的文档**（2小时）

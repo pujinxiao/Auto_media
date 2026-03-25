@@ -416,6 +416,8 @@ Return a JSON array of shots only.
 
 **位置**：`image.py:88`，`_build_character_prompt(name, role, description)`
 
+> 当前口径：角色图已从旧的 portrait/avatar 方向调整为更适合资产库管理的 full-body character design sheet；`design_prompt` 是当前主字段，`prompt` 仍作为兼容字段保留。
+
 ### 7.1 角色参考图生成 Prompt
 
 根据 role 注入视觉基调：
@@ -429,11 +431,11 @@ Return a JSON array of shots only.
 **输出 prompt**：
 
 ```
-Character portrait of {name}, {role_cue},
+Full-body character design sheet for {name}, {role_cue},
 character description: {description},
-unique individual character design, distinctive appearance,
-cinematic portrait, highly detailed, professional character concept art,
-clean background, studio lighting, 8k resolution, photorealistic
+show the complete outfit from head to toe, clear silhouette, distinctive physical traits,
+front-facing hero pose, clean neutral backdrop, professional character concept art,
+costume details, fabric texture, accessories, production-ready character sheet, highly detailed, photorealistic
 ```
 
 ### 7.2 Visual DNA（视觉锚点）
@@ -477,7 +479,8 @@ with orange nylon straps, dark combat boots, lean athletic build
     "牧之": {
       "image_url": "/media/characters/xxx.png",
       "image_path": "media/characters/xxx.png",
-      "portrait_prompt": "Character portrait of 牧之...",
+      "design_prompt": "Full-body character design sheet for 牧之...",
+      "prompt": "Full-body character design sheet for 牧之...",
       "visual_dna": "28-year-old East Asian man, short black hair with undercut, distinct scar on left eyebrow, wearing matte black tactical techwear jacket with orange nylon straps, dark combat boots, lean athletic build"
     }
   }

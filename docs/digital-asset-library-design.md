@@ -3,6 +3,8 @@
 > 修订日期：2026-03-25
 >
 > 目标：在同一个剧本的流水线执行过程中，自动保证所有镜头在画风、场景氛围、人物外貌上的视觉一致性。无需新增用户界面，纯后端实现。
+>
+> 当前边界：自动/手动统一 `StoryContext`、脏外貌缓存清洗、自然语言角色锚点、`negative_prompt` 修复、角色图转向 full-body character sheet 已落地；DSPy 反馈回路、场景图片资产层、按整体背景分组的场景分镜、场景图辅助视频生成仍是后续计划，本文仅预留接口与数据边界，不代表已实现。
 
 ---
 
@@ -27,6 +29,9 @@
 3. `Shot` schema 已正式拆分为 `image_prompt`、`final_video_prompt`、`last_frame_prompt`，分镜 LLM 不再只产出单一 `visual_prompt`。
 4. `app/services/storyboard.py` 的 `_postprocess_shot()` 会优先保留分镜 LLM 已生成的图片/视频 prompt，只做轻量归一化与兜底补全，不再无脑重组 prompt。
 5. `PipelineExecutor` 当前通过 `_build_image_prompts()` 和 `_build_video_prompt()` 分别构造图片/视频阶段输入；两者共享角色增强策略，但不再复用同一个 prompt 字段。
+6. 自动 `auto-generate`、手动 `/pipeline/*`、单镜头 `/image/*`、`/video/*` 现在已经统一复用 `StoryContext` 主入口，不再因为 `.env` 凭证回退而跳过外貌/场景缓存抽取。
+7. 运行期角色锚点已从 `Character anchor: A: ...; B: ...` 这种硬拼格式收敛为自然语言短句，并增加了脏外貌缓存清洗，避免把性格/剧情摘要直接注入生成 prompt。
+8. 图片 fallback 路径中的 `negative_prompt` 已与 `art_style` 解耦，不再把正向风格词串进负向提示词。
 
 因此本文档后续讨论的重点，不是“画风 header 怎么传”，而是更深一层的视觉一致性治理：去污染、角色锚点结构化、场景风格缓存和统一的分字段 prompt 组装。
 

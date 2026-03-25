@@ -3,6 +3,8 @@
 > 更新日期：2026-03-25
 >
 > 当前状态：MVP 可用，故事生成、角色设计、视频流水线、历史恢复与画风设定均已接通。
+>
+> 边界说明：`StoryContext` 主链路、角色设定图（full-body character sheet）与脏外貌缓存清洗已落地；DSPy 提取器、VLM 反馈闭环、场景图片资产层、按整体背景分组的场景分镜辅助仍属于后续计划，当前未实现。
 
 ---
 
@@ -82,10 +84,10 @@
 | 手动视频渲染 | ✅ | `/pipeline/{project_id}/render-video` |
 | 进度查询 | ✅ | `/pipeline/{project_id}/status` |
 | 视频拼接 | ✅ | `/pipeline/{project_id}/concat` |
-| 单镜头音视频合成 | 🔶 | `/pipeline/{project_id}/stitch` 接口已存在，但当前仍是占位模拟实现 |
+| 单镜头音视频合成 | ✅ | 统一由正式拼接链路 `/pipeline/{project_id}/concat` 与批量 FFmpeg 合成能力承载，不再保留占位 `/stitch` 入口 |
 | `separated` 策略 | ✅ | 全链路可用 |
 | `chained` 策略 | ✅ | 场景内末帧传递，增强连续性 |
-| `integrated` 策略 | 🔶 | 接口存在，但底层仍复用图生视频链路 |
+| `integrated` 策略 | 🔶 | 当前会显式降级为 image-to-video fallback，并返回非一体化说明 |
 
 ---
 
@@ -169,12 +171,11 @@
 | `/api/v1/pipeline/{project_id}/render-video` | `POST` | ✅ | 手动视频生成 |
 | `/api/v1/pipeline/{project_id}/status` | `GET` | ✅ | 查询状态 |
 | `/api/v1/pipeline/{project_id}/concat` | `POST` | ✅ | 多视频拼接 |
-| `/api/v1/pipeline/{project_id}/stitch` | `POST` | 🔶 | 接口已保留，当前仍为占位模拟实现 |
 
 说明：
 
 - 自动模式状态写入数据库
-- 手动步进模式的状态仍主要保存在进程内内存中
+- 手动步进模式现在也以数据库中的 pipeline 记录为状态真相源；前端刷新后通过持久化的 `story_id + pipeline_id` 恢复连续性
 
 ### 4.3 Asset API
 
@@ -187,6 +188,38 @@
 | `/api/v1/video/{project_id}/generate` | `POST` | ✅ |
 | `/api/v1/tts/voices` | `GET` | ✅ |
 | `/api/v1/tts/{project_id}/generate` | `POST` | ✅ |
+
+### 4.3.1 当前数字资产库
+
+按当前项目实际，“数字资产库”的核心不是图片、视频、音频文件本体，而是各种可复用的提示词资产与一致性锚点。
+
+当前已经实现的数字资产库，可以理解为“以 Story 为中心的提示词资产层”。它的作用是把人设、画风、场景风格、角色外貌、负向约束等内容持久化，在后续分镜、出图、出视频时反复复用。
+
+当前已经落地的资产主要包括：
+
+- 全局画风资产：存于 `stories.art_style`
+- 角色设定资产：存于 `stories.character_images[*]`，关键字段包括 `prompt`、`design_prompt`、`visual_dna`
+- 角色外貌资产：存于 `stories.meta["character_appearance_cache"]`，关键字段包括 `body`、`clothing`、`negative_prompt`
+- 场景风格资产：存于 `stories.meta["scene_style_cache"]`，关键字段包括 `keywords`、`image_extra`、`video_extra`、`negative_prompt`
+- 分镜级 prompt 资产：运行时由 `StoryContext` 和 `build_generation_payload()` 统一组装成 `image_prompt`、`final_video_prompt`、`last_frame_prompt`、`negative_prompt`
+
+它们之间的关系可以简单理解为：
+
+- `character_images` 是人设图和角色设定相关的提示词资产层
+- `character_appearance_cache` 是运行期角色一致性资产层
+- `scene_style_cache` 是场景 / 世界观的可复用风格资产层
+- `build_generation_payload()` 是把这些资产拼装成实际生成 prompt 的统一入口
+
+所以，当前项目已经实现的数字资产库，最准确的概括是：
+
+- 它是“以 Story 为中心的提示词资产层”
+- 它已经能持久化、恢复和复用全局画风、角色外貌、人设图 prompt、场景风格等资产
+- 图片 / 视频 / 音频文件是这层资产生成出来的结果，不是这里所说的资产库主体
+
+当前还没有实现的部分包括：
+
+- 独立的 `digital_assets` / `asset_library` 专用表
+- 通用资产 ID、版本管理、标签检索和跨故事复用体系
 
 ### 4.4 数据模型
 
@@ -237,7 +270,10 @@
 
 - 画风透传已实现
 - `StoryContext` / `build_generation_payload()` 已经进入主生成链路，用于统一组装 `image_prompt` / `final_video_prompt` / `last_frame_prompt` / `negative_prompt`
-- 角色外貌锁定当前仍以 `Story.meta["character_appearance_cache"]` + `character_images.visual_dna` + 启发式回退为主，尚未接入 DSPy 这类声明式结构化提取器
+- 自动 `auto-generate` 与手动 `storyboard` / `image` / `video` 链路现在都复用同一套 `StoryContext` 入口，不再因为 `.env` 回退场景而跳过角色/场景缓存抽取
+- 角色外貌锁定当前仍以 `Story.meta["character_appearance_cache"]` + `character_images.visual_dna` + 启发式回退为主，但已经增加了“物理特征 / 服装”清洗，不再把明显的性格、剧情、背景摘要直接注入 prompt
+- 多角色镜头的运行期角色锚点已改为更自然的语言拼接，不再使用 `Character anchor: A: ...; B: ...` 这种硬标签串接
+- 图片 fallback 路径中的 `negative_prompt` 已与 `art_style` 解耦，避免把正向风格词误写进负向提示词
 - Prompt Caching 仍停留在设计阶段
 - 图片/视频生成当前仍是“一次生成直出”，尚未在 `PipelineExecutor` 中加入基于 VLM 的自动质检与重试闭环
 
@@ -268,12 +304,12 @@
 |------|------|------|
 | `integrated` 策略未真正一体化 | 中 | 仍复用图生视频链路 |
 | 手动步进状态以内存保存 | 中 | 进程重启后丢失 |
-| `/stitch` 仍为占位实现 | 中 | 接口存在，但尚未接入真实 FFmpeg 合成批处理 |
-| 人物一致性仍非结构化缓存驱动 | 高 | `StoryContext` 方案尚未完全落地 |
+| `/stitch` 重复占位入口已移除 | 已完成 | 正式主链路仅保留 `/pipeline/{project_id}/concat` 作为拼接入口 |
+| 人物一致性仍非结构化缓存驱动 | 中 | 当前已完成主链路统一与脏锚点清洗，但尚未接入 DSPy / VLM 闭环 |
 | Prompt Caching 尚未接入 | 中 | 仅有设计文档 |
 | DSPy 声明式提取尚未接入 | 中 | 角色外貌提取仍以启发式和缓存回退为主 |
 | 生成后反馈闭环尚未接入 | 中 | 尚无 VLM 质检、选择性抽检与自动重试 |
-| 历史遗留 `projects` 模块 | 中 | 与主 Story / Pipeline 流程割裂 |
+| 历史遗留 `projects` 模块 | 中 | 路由已从主应用卸载，遗留文件待后续目录清理 |
 | 更强的断点续跑 | 中 | 尚未实现 |
 
 ---
@@ -294,7 +330,7 @@
 
 ### P1
 
-- [ ] 落地 `StoryContext` 一致性引擎
+- [ ] 继续收口 legacy 无 `story_id` fallback，统一资产字段访问与提示词拼装边界
 - [ ] 接入 Prompt Caching
 - [ ] 用 DSPy 重构角色外貌提取器，并将编译产物作为离线资产加载
 - [ ] 在 `PipelineExecutor` 增加选择性 VLM 质检与重试闭环
@@ -303,7 +339,7 @@
 
 ### P2
 
-- [ ] 清理 `projects` 遗留模块
+- [ ] 清理未挂载的 `projects` 遗留文件
 - [ ] 优化多角色一致性
 - [ ] 增强错误恢复与断点续跑
 - [ ] 进一步完善首尾帧与过渡分镜能力

@@ -29,7 +29,10 @@ export const useStoryStore = defineStore('story', {
   },
   actions: {
     setSelectedSetting(val) { this.selectedSetting = val },
-    setArtStyle(val) { this.artStyle = val },
+    setArtStyle(val) {
+      const normalized = (val ?? '').trim()
+      this.artStyle = normalized.length ? normalized : ''
+    },
     setStep(n) { this.currentStep = n },
     setInput(idea, genre, tone) { this.input = { idea, genre, tone } },
     setAnalyzeResult({ story_id, analysis, suggestions, placeholder, usage }) {

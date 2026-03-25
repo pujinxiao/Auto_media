@@ -36,6 +36,7 @@
       <!-- 确认行 -->
       <div class="confirm-row">
         <span v-if="saved" class="saved-hint">✓ 已保存</span>
+        <span v-if="saveError" class="error-hint">{{ saveError }}</span>
         <button
           class="confirm-btn"
           :disabled="localStyle === store.artStyle"
@@ -69,11 +70,12 @@ const expanded = ref(false)
 const selectedPresetId = ref(null)
 const localStyle = ref('')
 const saved = ref(false)
+const saveError = ref('')
 
 /** 已确认保存的 preset 名（根据 store 中的值） */
 const confirmedPresetName = computed(() => {
-  const p = PRESETS.find(p => p.prompt === store.artStyle)
-  return p ? p.name : null
+  const foundPreset = PRESETS.find(preset => preset.prompt === store.artStyle)
+  return foundPreset ? foundPreset.name : null
 })
 
 onMounted(() => {
@@ -103,19 +105,61 @@ function onTextInput() {
 
 /** 清除：立即清空并持久化 */
 async function clearStyle() {
+  const previousState = {
+    localStyle: localStyle.value,
+    selectedPresetId: selectedPresetId.value,
+    artStyle: store.artStyle,
+    saved: saved.value,
+    expanded: expanded.value,
+  }
+  saveError.value = ''
   localStyle.value = ''
   selectedPresetId.value = null
   store.setArtStyle('')
   if (store.storyId) {
-    await patchStory(store.storyId, { art_style: '' }).catch(() => {})
+    try {
+      const result = await patchStory(store.storyId, { art_style: '' })
+      if (!result) throw new Error('patchStory returned no result')
+    } catch (error) {
+      console.error('Failed to clear art style:', error)
+      localStyle.value = previousState.localStyle
+      selectedPresetId.value = previousState.selectedPresetId
+      store.setArtStyle(previousState.artStyle)
+      saved.value = previousState.saved
+      expanded.value = previousState.expanded
+      saveError.value = '清除失败，请重试'
+    }
   }
 }
 
 /** 确认：写入 store（localStorage）并持久化到后端 */
 async function confirmStyle() {
+  const previousState = {
+    localStyle: localStyle.value,
+    selectedPresetId: selectedPresetId.value,
+    artStyle: store.artStyle,
+    saved: saved.value,
+    expanded: expanded.value,
+  }
+  saveError.value = ''
   store.setArtStyle(localStyle.value)
-  if (store.storyId) {
-    await patchStory(store.storyId, { art_style: localStyle.value }).catch(() => {})
+  localStyle.value = store.artStyle
+  const match = PRESETS.find(preset => preset.prompt === localStyle.value)
+  selectedPresetId.value = match ? match.id : null
+  try {
+    if (store.storyId) {
+      const result = await patchStory(store.storyId, { art_style: store.artStyle })
+      if (!result) throw new Error('patchStory returned no result')
+    }
+  } catch (error) {
+    console.error('Failed to persist art style:', error)
+    localStyle.value = previousState.localStyle
+    selectedPresetId.value = previousState.selectedPresetId
+    store.setArtStyle(previousState.artStyle)
+    saved.value = previousState.saved
+    expanded.value = previousState.expanded
+    saveError.value = '保存失败，请重试'
+    return
   }
   saved.value = true
   setTimeout(() => { saved.value = false }, 2000)
@@ -269,6 +313,11 @@ watch(() => store.artStyle, (val) => {
 .saved-hint {
   font-size: 12px;
   color: #22c55e;
+}
+
+.error-hint {
+  font-size: 12px;
+  color: #e53935;
 }
 
 .confirm-btn {

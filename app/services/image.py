@@ -162,8 +162,14 @@ async def generate_character_images_batch(
     """Generate character design images for all characters concurrently."""
     tasks = [
         generate_character_image(
-            char["name"], char.get("role", ""), char.get("description", ""),
-            story_id, model, image_api_key, image_base_url, art_style
+            character_name=char["name"],
+            role=char.get("role", ""),
+            description=char.get("description", ""),
+            story_id=story_id,
+            model=model,
+            image_api_key=image_api_key,
+            image_base_url=image_base_url,
+            art_style=art_style,
         )
         for char in characters
     ]

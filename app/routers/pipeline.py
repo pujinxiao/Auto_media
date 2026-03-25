@@ -71,6 +71,7 @@ async def auto_generate(
     video_api_key = video_cfg["video_api_key"]
     video_base_url = video_cfg["video_base_url"]
     video_provider = video_cfg["video_provider"]
+    art_style = req.art_style or get_art_style(request)
 
     async def _run_pipeline():
         """后台执行流水线"""
@@ -120,7 +121,7 @@ async def auto_generate(
                 video_base_url=video_base_url,
                 video_provider=video_provider,
                 character_info=character_info,
-                art_style=req.art_style or get_art_style(request),
+                art_style=art_style,
             )
 
     background_tasks.add_task(_run_pipeline)

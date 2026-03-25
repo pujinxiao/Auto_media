@@ -71,7 +71,7 @@ class AutoGenerateRequest(BaseModel):
     # 服务地址（用于拼接本地文件 URL）
     base_url: str = "http://localhost:8000"
 
-    # 画风提示词（统一应用于图片/视频生成）
+    # 画风提示词(统一应用于图片/视频生成)
     art_style: str = ""
 
 

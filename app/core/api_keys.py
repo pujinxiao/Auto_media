@@ -247,7 +247,15 @@ def get_art_style(request: Request) -> str:
 
 
 def inject_art_style(prompt: str, art_style: str) -> str:
-    """将画风追加到 prompt 末尾（内容描述优先，画风权重次之）。"""
+    """Append art style to end of prompt (content first, style weight second)."""
     if not art_style or not prompt:
         return prompt
-    return f"{prompt}, {art_style}"
+    normalized_prompt = prompt.rstrip()
+    normalized_style = art_style.strip()
+    if not normalized_style:
+        return normalized_prompt
+    if normalized_prompt.endswith(normalized_style):
+        return normalized_prompt
+    if f", {normalized_style}" in normalized_prompt:
+        return normalized_prompt
+    return f"{normalized_prompt}, {normalized_style}"

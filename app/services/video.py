@@ -1,9 +1,12 @@
 import asyncio
+import hashlib
 import logging
 import re
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -20,6 +23,68 @@ DEFAULT_MODEL = "wan2.6-i2v-flash"
 DEFAULT_PROVIDER = "dashscope"
 
 
+def _versioned_media_name(stem: str, suffix: str) -> str:
+    token = hashlib.md5(f"{stem}:{time.time_ns()}".encode()).hexdigest()[:8]
+    safe_stem = re.sub(r"[^A-Za-z0-9_-]", "_", stem)
+    safe_stem = re.sub(r"_+", "_", safe_stem).strip("_") or "asset"
+    return f"{safe_stem}_{token}{suffix}"
+
+
+async def _generate_remote_video(
+    provider,
+    image_url: str,
+    prompt: str,
+    model: str,
+    video_api_key: str,
+    video_base_url: str,
+    last_frame_url: str,
+    negative_prompt: str,
+) -> str:
+    return await provider.generate(
+        image_url,
+        prompt,
+        model,
+        video_api_key,
+        video_base_url,
+        last_frame_url,
+        negative_prompt,
+    )
+
+
+def _sanitize_remote_url(remote_url: str) -> str:
+    parsed = urlparse(remote_url or "")
+    if not parsed.scheme and not parsed.netloc:
+        return remote_url
+    sanitized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme else f"{parsed.netloc}{parsed.path}"
+    return sanitized or remote_url
+
+
+async def _download_video_with_retry(remote_url: str, shot_id: str) -> bytes:
+    attempts = 3
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                vid_resp = await client.get(remote_url)
+                vid_resp.raise_for_status()
+                return vid_resp.content
+        except (httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError, httpx.HTTPStatusError) as exc:
+            last_exc = exc
+            logger.warning(
+                "Video download transient failure for shot_id=%s attempt=%s/%s remote_url=%s error=%r",
+                shot_id,
+                attempt,
+                attempts,
+                _sanitize_remote_url(remote_url),
+                exc,
+            )
+            if attempt == attempts:
+                break
+            await asyncio.sleep(min(2 * attempt, 5))
+    assert last_exc is not None
+    raise last_exc
+
+
 async def generate_video(
     image_url: str,
     prompt: str,
@@ -29,6 +94,7 @@ async def generate_video(
     video_base_url: str = "",
     video_provider: str = DEFAULT_PROVIDER,
     last_frame_url: str = "",
+    negative_prompt: str = "",
 ) -> dict:
     """Generate video for a single shot.
 
@@ -46,21 +112,26 @@ async def generate_video(
         { shot_id, video_path, video_url }
     """
     provider = get_video_provider(video_provider)
-    remote_url = await provider.generate(
-        image_url, prompt, model, video_api_key, video_base_url, last_frame_url
+    remote_url = await _generate_remote_video(
+        provider,
+        image_url=image_url,
+        prompt=prompt,
+        model=model,
+        video_api_key=video_api_key,
+        video_base_url=video_base_url,
+        last_frame_url=last_frame_url,
+        negative_prompt=negative_prompt,
     )
+    video_bytes = await _download_video_with_retry(remote_url, shot_id)
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        vid_resp = await client.get(remote_url)
-        vid_resp.raise_for_status()
-
-    output_path = VIDEO_DIR / f"{shot_id}.mp4"
-    output_path.write_bytes(vid_resp.content)
+    filename = _versioned_media_name(shot_id, ".mp4")
+    output_path = VIDEO_DIR / filename
+    output_path.write_bytes(video_bytes)
 
     return {
         "shot_id": shot_id,
         "video_path": str(output_path),
-        "video_url": f"/media/videos/{shot_id}.mp4",
+        "video_url": f"/media/videos/{filename}",
     }
 
 
@@ -91,6 +162,7 @@ async def generate_videos_batch(
             video_base_url=video_base_url,
             video_provider=video_provider,
             last_frame_url=f"{base_url}{shot['last_frame_url']}" if shot.get("last_frame_url") else "",
+            negative_prompt=shot.get("negative_prompt", ""),
         )
         for shot in shots
         if shot.get("image_url")
@@ -164,6 +236,7 @@ async def generate_videos_chained(
                     model=image_model,
                     image_api_key=image_api_key,
                     image_base_url=image_base_url,
+                    negative_prompt=shot.get("negative_prompt", ""),
                 )
                 image_url_for_video = f"{base_url}{img_result['image_url']}"
                 local_image_url = img_result["image_url"]
@@ -187,6 +260,7 @@ async def generate_videos_chained(
                 video_api_key=video_api_key,
                 video_base_url=video_base_url,
                 video_provider=video_provider,
+                negative_prompt=shot.get("negative_prompt", ""),
             )
 
             # 提取最后一帧供下一镜头使用

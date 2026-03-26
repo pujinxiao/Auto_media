@@ -193,6 +193,9 @@
       <div v-if="error" class="error-message">
         ❌ {{ error }}
       </div>
+      <div v-if="transitionMessage" class="info-message">
+        {{ transitionMessage }}
+      </div>
 
       <!-- API Key Modal -->
       <ApiKeyModal
@@ -226,56 +229,117 @@
             </button>
           </div>
         </div>
+        <div class="transition-note">
+          过渡视频能力当前仅展示前端 UI。这里先预留相邻镜头之间的插槽和状态文案，暂不调用后端接口，也不会改变现有生成与导出逻辑。
+        </div>
         <div class="shots-grid">
-          <div v-for="shot in shots" :key="shot.shot_id" class="shot-card">
-            <div class="shot-header">
-              <span class="shot-id">{{ shot.shot_id }}</span>
-              <div class="shot-meta">
-                <span class="tag type">{{ shot.camera_setup?.movement || shot.camera_motion }}</span>
-                <span class="tag">{{ shot.estimated_duration }}s</span>
+          <template v-for="item in storyboardFlowItems" :key="item.key">
+            <div v-if="item.type === 'shot'" class="shot-card">
+              <div class="shot-header">
+                <span class="shot-id">{{ item.shot.shot_id }}</span>
+                <div class="shot-meta">
+                  <span class="tag type">{{ item.shot.camera_setup?.movement || item.shot.camera_motion }}</span>
+                  <span class="tag">{{ item.shot.estimated_duration }}s</span>
+                </div>
+              </div>
+              <div v-if="hasSpeechAudio(item.shot)" class="shot-field">
+                <label>台词 / 旁白</label>
+                <p>{{ item.shot.audio_reference?.content || item.shot.dialogue }}</p>
+              </div>
+              <div class="shot-field">
+                <label>画面描述</label>
+                <p>{{ item.shot.storyboard_description || item.shot.visual_description_zh }}</p>
+              </div>
+              <div v-if="item.shot.image_prompt" class="shot-field">
+                <label>Image Prompt</label>
+                <p class="en">{{ item.shot.image_prompt }}</p>
+              </div>
+              <div class="shot-field">
+                <label>Video Prompt</label>
+                <p class="en">{{ item.shot.final_video_prompt || item.shot.visual_prompt }}</p>
+              </div>
+
+              <div v-if="hasSpeechAudio(item.shot)" class="tts-bar">
+                <button class="tts-btn" @click="generateOneTTS(item.shot.shot_id)" :disabled="item.shot.ttsLoading">
+                  {{ item.shot.ttsLoading ? '生成中...' : '生成语音' }}
+                </button>
+                <audio v-if="item.shot.audio_url" :src="getMediaUrl(item.shot.audio_url)" controls style="height: 28px; flex: 1"></audio>
+                <span v-if="item.shot.audio_duration" class="tts-duration">{{ item.shot.audio_duration.toFixed(1) }}s</span>
+              </div>
+
+              <div class="tts-bar">
+                <button class="tts-btn" @click="generateOneImage(item.shot.shot_id)" :disabled="item.shot.imageLoading">
+                  {{ item.shot.imageLoading ? '生成中...' : '生成图片' }}
+                </button>
+              </div>
+              <img v-if="item.shot.image_url" :src="getMediaUrl(item.shot.image_url)" class="shot-image" />
+              <div v-if="item.shot.image_url" class="tts-bar">
+                <button class="tts-btn" @click="generateOneImage(item.shot.shot_id)" :disabled="item.shot.imageLoading">重新生成图片</button>
+                <button class="tts-btn" @click="generateOneVideo(item.shot.shot_id)" :disabled="item.shot.videoLoading">
+                  {{ item.shot.videoLoading ? '生成中...' : '生成视频' }}
+                </button>
+              </div>
+              <video v-if="item.shot.video_url" :src="getMediaUrl(item.shot.video_url)" controls class="shot-video"></video>
+            </div>
+
+            <div v-else class="transition-slot" :class="{ ready: item.ready }">
+              <div class="transition-slot-top">
+                <div class="transition-heading">
+                  <span class="transition-kicker">Transition Slot</span>
+                  <div class="transition-title-row">
+                    <div class="transition-title">过渡视频</div>
+                    <span class="transition-status-badge" :class="{ ready: item.ready }">
+                      {{ item.ready ? 'Ready' : 'Pending' }}
+                    </span>
+                  </div>
+                </div>
+                <span class="transition-pair">{{ item.fromShot.shot_id }} -> {{ item.toShot.shot_id }}</span>
+              </div>
+              <div class="transition-preview-strip">
+                <div class="transition-frame">
+                  <div class="transition-frame-label">前镜尾部</div>
+                  <img
+                    v-if="item.fromShot.last_frame_url || item.fromShot.image_url"
+                    :src="getMediaUrl(item.fromShot.last_frame_url || item.fromShot.image_url)"
+                    class="transition-frame-image"
+                  />
+                  <div v-else class="transition-frame-placeholder">等待首帧素材</div>
+                </div>
+                <div class="transition-arrow-wrap">
+                  <span class="transition-arrow-line"></span>
+                  <span class="transition-arrow-text">过渡</span>
+                </div>
+                <div class="transition-frame">
+                  <div class="transition-frame-label">后镜首部</div>
+                  <img
+                    v-if="item.toShot.image_url"
+                    :src="getMediaUrl(item.toShot.image_url)"
+                    class="transition-frame-image"
+                  />
+                  <div v-else class="transition-frame-placeholder">等待目标首帧</div>
+                </div>
+              </div>
+              <p class="transition-copy">
+                {{ item.ready
+                  ? '前后镜头素材已就绪，可在这里插入过渡片段。当前仅展示 UI，不会真正发起生成。'
+                  : '等待前后镜头至少生成出图片或视频后，再进入可生成状态。当前仅保留界面占位。'
+                }}
+              </p>
+              <div class="transition-meta">
+                <span class="transition-chip">建议时长 1-2s</span>
+                <span class="transition-pill" :class="{ active: !!item.fromShot.video_url }">前镜视频</span>
+                <span class="transition-pill" :class="{ active: !!(item.toShot.video_url || item.toShot.image_url) }">后镜首帧</span>
+              </div>
+              <div class="transition-action-row">
+                <button class="transition-btn" :class="{ disabled: !item.ready }" @click="previewTransitionSlot(item)">
+                  {{ item.ready ? '生成过渡视频（UI预留）' : '过渡视频待就绪' }}
+                </button>
+                <span class="transition-hint">
+                  {{ item.ready ? '下一步可接后端生成接口' : '先补齐两侧素材' }}
+                </span>
               </div>
             </div>
-            <div v-if="hasSpeechAudio(shot)" class="shot-field">
-              <label>台词 / 旁白</label>
-              <p>{{ shot.audio_reference?.content || shot.dialogue }}</p>
-            </div>
-            <div class="shot-field">
-              <label>画面描述</label>
-              <p>{{ shot.storyboard_description || shot.visual_description_zh }}</p>
-            </div>
-            <div v-if="shot.image_prompt" class="shot-field">
-              <label>Image Prompt</label>
-              <p class="en">{{ shot.image_prompt }}</p>
-            </div>
-            <div class="shot-field">
-              <label>Video Prompt</label>
-              <p class="en">{{ shot.final_video_prompt || shot.visual_prompt }}</p>
-            </div>
-
-            <!-- TTS controls -->
-            <div v-if="hasSpeechAudio(shot)" class="tts-bar">
-              <button class="tts-btn" @click="generateOneTTS(shot.shot_id)" :disabled="shot.ttsLoading">
-                {{ shot.ttsLoading ? '生成中...' : '生成语音' }}
-              </button>
-              <audio v-if="shot.audio_url" :src="getMediaUrl(shot.audio_url)" controls style="height: 28px; flex: 1"></audio>
-              <span v-if="shot.audio_duration" class="tts-duration">{{ shot.audio_duration.toFixed(1) }}s</span>
-            </div>
-
-            <!-- Image controls -->
-            <div class="tts-bar">
-              <button class="tts-btn" @click="generateOneImage(shot.shot_id)" :disabled="shot.imageLoading">
-                {{ shot.imageLoading ? '生成中...' : '生成图片' }}
-              </button>
-            </div>
-            <img v-if="shot.image_url" :src="getMediaUrl(shot.image_url)" class="shot-image" />
-            <div v-if="shot.image_url" class="tts-bar">
-              <button class="tts-btn" @click="generateOneImage(shot.shot_id)" :disabled="shot.imageLoading">重新生成图片</button>
-              <button class="tts-btn" @click="generateOneVideo(shot.shot_id)" :disabled="shot.videoLoading">
-                {{ shot.videoLoading ? '生成中...' : '生成视频' }}
-              </button>
-            </div>
-            <video v-if="shot.video_url" :src="getMediaUrl(shot.video_url)" controls class="shot-video"></video>
-          </div>
+          </template>
         </div>
 
         <!-- 完整视频播放器 -->
@@ -317,6 +381,7 @@ const manualOverride = ref(false)
 const isParsing = ref(false)
 const isGenerating = ref(false)
 const error = ref('')
+const transitionMessage = ref('')
 const shots = computed(() => storyStore.shots)
 const voices = ref([])
 const selectedVoice = ref('')
@@ -340,25 +405,150 @@ onUnmounted(() => {
 // 视频拼接
 const concatLoading = ref(false)
 const concatVideoUrl = ref('')
+const manualProjectId = ref(storyStore.manualProjectId || storyStore.storyId || '')
+const manualPipelineId = ref(storyStore.manualPipelineId || '')
+const manualStoryId = ref(storyStore.manualStoryId || storyStore.storyId || '')
 
 const hasAnyVideo = computed(() => shots.value.some(s => s.video_url))
+const storyboardFlowItems = computed(() => {
+  const items = []
+  for (let i = 0; i < shots.value.length; i += 1) {
+    const shot = shots.value[i]
+    items.push({
+      type: 'shot',
+      key: `shot-${shot.shot_id}`,
+      shot,
+    })
+
+    const nextShot = shots.value[i + 1]
+    if (!nextShot) continue
+
+    items.push({
+      type: 'transition',
+      key: `transition-${shot.shot_id}-${nextShot.shot_id}`,
+      fromShot: shot,
+      toShot: nextShot,
+      ready: !!shot.video_url && !!(nextShot.video_url || nextShot.image_url),
+    })
+  }
+  return items
+})
 
 // 生成唯一 ID
 function generateUniqueId() {
   return `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-// 并发限制执行器
-const MAX_CONCURRENCY = 3
-
-async function runWithConcurrency(items, fn, concurrency = MAX_CONCURRENCY) {
-  const results = []
-  for (let i = 0; i < items.length; i += concurrency) {
-    const batch = items.slice(i, i + concurrency)
-    const batchResults = await Promise.allSettled(batch.map(fn))
-    results.push(...batchResults)
+function resolveManualProjectId() {
+  if (storyStore.storyId) {
+    rememberManualPipelineContext({
+      projectId: storyStore.storyId,
+      storyId: storyStore.storyId,
+    })
+    return storyStore.storyId
   }
-  return results
+  if (!manualProjectId.value) {
+    manualProjectId.value = generateUniqueId()
+    storyStore.setManualPipelineContext({ projectId: manualProjectId.value })
+  }
+  return manualProjectId.value
+}
+
+function effectiveStoryId() {
+  return manualStoryId.value || storyStore.storyId || manualProjectId.value
+}
+
+function rememberManualPipelineContext({ projectId, pipelineId, storyId } = {}) {
+  if (projectId) manualProjectId.value = projectId
+  if (pipelineId) manualPipelineId.value = pipelineId
+  if (storyId) manualStoryId.value = storyId
+  storyStore.setManualPipelineContext({
+    projectId: manualProjectId.value,
+    pipelineId: manualPipelineId.value,
+    storyId: manualStoryId.value,
+  })
+}
+
+function buildPipelineQuery(params = {}) {
+  const searchParams = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return
+    searchParams.set(key, String(value))
+  })
+  const query = searchParams.toString()
+  return query ? `?${query}` : ''
+}
+
+function updateShotsFromGeneratedFiles(generatedFiles = {}) {
+  if (!generatedFiles || typeof generatedFiles !== 'object') return
+
+  const updateShot = (shotId, updater) => {
+    const shot = shots.value.find(s => s.shot_id === shotId)
+    if (!shot) return
+    updater(shot)
+  }
+
+  Object.values(generatedFiles.tts || {}).forEach(result => {
+    updateShot(result.shot_id, shot => {
+      shot.audio_url = result.audio_url
+      shot.audio_duration = result.duration_seconds
+    })
+  })
+
+  Object.values(generatedFiles.images || {}).forEach(result => {
+    updateShot(result.shot_id, shot => {
+      shot.image_url = result.image_url
+      shot.last_frame_url = result.last_frame_url || null
+    })
+  })
+
+  Object.values(generatedFiles.videos || {}).forEach(result => {
+    updateShot(result.shot_id, shot => {
+      shot.video_url = result.video_url
+    })
+  })
+
+  if (generatedFiles.final_video_url) {
+    concatVideoUrl.value = generatedFiles.final_video_url
+  }
+}
+
+async function pollManualPipeline({ projectId, pipelineId, storyId, isDone, timeoutMs = 180000, intervalMs = 1200 }) {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const res = await fetch(
+      `${getBackendUrl()}/api/v1/pipeline/${projectId}/status${buildPipelineQuery({
+        pipeline_id: pipelineId,
+        story_id: storyId,
+      })}`,
+      { headers: getHeaders() }
+    )
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null)
+      throw new Error(errData?.detail || `状态查询失败 (${res.status})`)
+    }
+
+    const state = await res.json()
+    rememberManualPipelineContext({
+      projectId,
+      pipelineId: state.pipeline_id || pipelineId,
+      storyId: state.story_id || storyId,
+    })
+    updateShotsFromGeneratedFiles(state.generated_files)
+
+    if (state.status === 'failed') {
+      throw new Error(state.error || '批量任务失败')
+    }
+    if (isDone(state)) {
+      return state
+    }
+
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+
+  throw new Error('批量任务等待超时')
 }
 
 // 计算属性
@@ -495,6 +685,7 @@ function processFile(file) {
     }
     uploadedScript.value = text.trim()
     error.value = ''
+    transitionMessage.value = ''
     storyStore.clearShots()
   }
   reader.readAsText(file)
@@ -567,7 +758,9 @@ async function parseStoryboard() {
 
   isParsing.value = true
   error.value = ''
+  transitionMessage.value = ''
   storyStore.clearShots()
+  concatVideoUrl.value = ''
   progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
   parseAbortController?.abort()
@@ -655,7 +848,7 @@ async function parseStoryboard() {
   }
 
   try {
-    const projectId = generateUniqueId()
+    const projectId = resolveManualProjectId()
 
     progress.value = { show: true, label: 'LLM 处理中，请稍候...', percent: 60 }
 
@@ -669,7 +862,8 @@ async function parseStoryboard() {
       body: JSON.stringify({
         script,
         provider: settings.provider,
-        model: settings.model
+        model: settings.model,
+        story_id: effectiveStoryId(),
       })
     })
 
@@ -680,6 +874,11 @@ async function parseStoryboard() {
 
     progress.value = { show: true, label: '解析完成，渲染卡片...', percent: 90 }
     const data = await res.json()
+    rememberManualPipelineContext({
+      projectId,
+      pipelineId: data.pipeline_id || '',
+      storyId: data.story_id || storyStore.storyId || projectId,
+    })
     storyStore.setShots(data.shots)
 
     // 更新 token 统计
@@ -712,11 +911,13 @@ async function parseStoryboard() {
 }
 
 function getBackendUrl() {
-  // 开发环境使用代理，避免 CORS 问题
-  if (import.meta.env.DEV) {
-    return ''
+  const configured = settings.backendUrl?.replace(/\/$/, '')
+  if (configured) return configured
+  if (import.meta.env.DEV) return 'http://localhost:8000'
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/$/, '')
   }
-  return settings.backendUrl || 'http://localhost:8000'
+  return ''
 }
 
 function getMediaUrl(path) {
@@ -748,6 +949,15 @@ async function loadVoices() {
 
 function hasSpeechAudio(shot) {
   return !!(shot && (shot.audio_reference?.content || shot.dialogue) && shot.audio_reference?.type !== 'sfx')
+}
+
+function previewTransitionSlot(item) {
+  if (!item?.fromShot || !item?.toShot) return
+  if (item.ready) {
+    transitionMessage.value = `过渡视频 UI 已预留：${item.fromShot.shot_id} -> ${item.toShot.shot_id}。当前版本仅展示前端界面，后端生成接口暂未接入。`
+    return
+  }
+  transitionMessage.value = `过渡槽位尚未就绪：请先为 ${item.fromShot.shot_id} 生成视频，并为 ${item.toShot.shot_id} 生成图片或视频。`
 }
 
 async function generateOneTTS(shotId) {
@@ -789,10 +999,67 @@ async function generateOneTTS(shotId) {
 
 async function generateAllTTS() {
   const shotsWithDialogue = shots.value.filter(hasSpeechAudio)
+  if (shotsWithDialogue.length === 0) return
+
   isGenerating.value = true
+  error.value = ''
+  transitionMessage.value = ''
+  shotsWithDialogue.forEach(shot => { shot.ttsLoading = true })
+
   try {
-    await runWithConcurrency(shotsWithDialogue, s => generateOneTTS(s.shot_id))
+    const projectId = resolveManualProjectId()
+    const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const query = buildPipelineQuery({
+      pipeline_id: manualPipelineId.value,
+      story_id: fallbackStoryId,
+      voice: selectedVoice.value,
+      generate_tts: true,
+      generate_images: false,
+      image_model: settings.effectiveImageModel || undefined,
+    })
+
+    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/generate-assets${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders() },
+      body: JSON.stringify({
+        pipeline_id: manualPipelineId.value || undefined,
+        story_id: fallbackStoryId,
+        shots: shots.value,
+      })
+    })
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null)
+      throw new Error(errData?.detail || `批量语音生成失败 (${res.status})`)
+    }
+
+    const data = await res.json()
+    rememberManualPipelineContext({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+    })
+    updateShotsFromGeneratedFiles(data.state?.generated_files)
+
+    await pollManualPipeline({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+      isDone: state => state.progress >= 60 && state.generated_files?.tts,
+    })
+  } catch (err) {
+    if (!isMounted.value) return
+    console.error('Batch TTS failed:', err)
+    const msg = err.message || '请求失败'
+    if (isAuthError(msg)) {
+      keyModalType.value = 'invalid'
+      keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
+      showKeyModal.value = true
+    } else {
+      error.value = '批量语音生成失败：' + msg
+    }
   } finally {
+    shotsWithDialogue.forEach(shot => { shot.ttsLoading = false })
     isGenerating.value = false
   }
 }
@@ -808,6 +1075,7 @@ async function generateOneImage(shotId) {
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
         shots: [shot],
+        story_id: effectiveStoryId(),
         ...(settings.effectiveImageModel ? { model: settings.effectiveImageModel } : {}),
       })
     })
@@ -836,10 +1104,66 @@ async function generateOneImage(shotId) {
 }
 
 async function generateAllImages() {
+  if (shots.value.length === 0) return
+
   isGenerating.value = true
+  error.value = ''
+  transitionMessage.value = ''
+  shots.value.forEach(shot => { shot.imageLoading = true })
+
   try {
-    await runWithConcurrency(shots.value, s => generateOneImage(s.shot_id))
+    const projectId = resolveManualProjectId()
+    const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const query = buildPipelineQuery({
+      pipeline_id: manualPipelineId.value,
+      story_id: fallbackStoryId,
+      generate_tts: false,
+      generate_images: true,
+      image_model: settings.effectiveImageModel || undefined,
+    })
+
+    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/generate-assets${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders() },
+      body: JSON.stringify({
+        pipeline_id: manualPipelineId.value || undefined,
+        story_id: fallbackStoryId,
+        shots: shots.value,
+      })
+    })
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null)
+      throw new Error(errData?.detail || `批量图片生成失败 (${res.status})`)
+    }
+
+    const data = await res.json()
+    rememberManualPipelineContext({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+    })
+    updateShotsFromGeneratedFiles(data.state?.generated_files)
+
+    await pollManualPipeline({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+      isDone: state => state.progress >= 60 && state.generated_files?.images,
+    })
+  } catch (err) {
+    if (!isMounted.value) return
+    console.error('Batch image generation failed:', err)
+    const msg = err.message || '请求失败'
+    if (isAuthError(msg)) {
+      keyModalType.value = 'invalid'
+      keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
+      showKeyModal.value = true
+    } else {
+      error.value = '批量图片生成失败：' + msg
+    }
   } finally {
+    shots.value.forEach(shot => { shot.imageLoading = false })
     isGenerating.value = false
   }
 }
@@ -855,6 +1179,7 @@ async function generateOneVideo(shotId) {
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
         shots: [shot],
+        story_id: effectiveStoryId(),
         ...(settings.effectiveVideoModel ? { model: settings.effectiveVideoModel } : {}),
       })
     })
@@ -883,10 +1208,61 @@ async function generateOneVideo(shotId) {
 
 async function generateAllVideos() {
   const shotsWithImages = shots.value.filter(s => s.image_url)
+  if (shotsWithImages.length === 0) return
+
   isGenerating.value = true
+  error.value = ''
+  transitionMessage.value = ''
+  shotsWithImages.forEach(shot => { shot.videoLoading = true })
+
   try {
-    await runWithConcurrency(shotsWithImages, s => generateOneVideo(s.shot_id))
+    const projectId = resolveManualProjectId()
+    const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const query = buildPipelineQuery({
+      pipeline_id: manualPipelineId.value,
+      story_id: fallbackStoryId,
+      base_url: getBackendUrl(),
+      video_model: settings.effectiveVideoModel || undefined,
+    })
+
+    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/render-video${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders() },
+      body: JSON.stringify(shotsWithImages)
+    })
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null)
+      throw new Error(errData?.detail || `批量视频生成失败 (${res.status})`)
+    }
+
+    const data = await res.json()
+    rememberManualPipelineContext({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+    })
+    updateShotsFromGeneratedFiles(data.state?.generated_files)
+
+    await pollManualPipeline({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+      isDone: state => state.progress >= 85 && state.generated_files?.videos,
+    })
+  } catch (err) {
+    if (!isMounted.value) return
+    console.error('Batch video generation failed:', err)
+    const msg = err.message || '请求失败'
+    if (isAuthError(msg)) {
+      keyModalType.value = 'invalid'
+      keyModalMsg.value = 'API Key 无效或已过期，请检查后重新设置。'
+      showKeyModal.value = true
+    } else {
+      error.value = '批量视频生成失败：' + msg
+    }
   } finally {
+    shotsWithImages.forEach(shot => { shot.videoLoading = false })
     isGenerating.value = false
   }
 }
@@ -901,10 +1277,17 @@ async function concatAllVideos() {
   concatLoading.value = true
   concatVideoUrl.value = ''
   error.value = ''
+  transitionMessage.value = ''
 
   try {
-    const projectId = generateUniqueId()
-    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/concat`, {
+    const projectId = resolveManualProjectId()
+    const fallbackStoryId = manualStoryId.value || storyStore.storyId || projectId
+    const query = buildPipelineQuery({
+      pipeline_id: manualPipelineId.value,
+      story_id: fallbackStoryId,
+    })
+
+    const res = await fetch(`${getBackendUrl()}/api/v1/pipeline/${projectId}/concat${query}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
@@ -916,6 +1299,11 @@ async function concatAllVideos() {
       throw new Error(errData?.detail || `拼接失败 (${res.status})`)
     }
     const data = await res.json()
+    rememberManualPipelineContext({
+      projectId,
+      pipelineId: data.pipeline_id || manualPipelineId.value,
+      storyId: data.story_id || fallbackStoryId,
+    })
     concatVideoUrl.value = data.video_url
   } catch (err) {
     console.error('Concat failed:', err)
@@ -927,6 +1315,10 @@ async function concatAllVideos() {
 
 onMounted(() => {
   loadVoices()
+  rememberManualPipelineContext({
+    projectId: storyStore.storyId || manualProjectId.value || '',
+    storyId: storyStore.storyId || manualStoryId.value || '',
+  })
 
   // 恢复持久化的 shots 时重置 loading 状态（防止刷新前正在生成导致状态卡住）
   storyStore.shots.forEach(s => {
@@ -1570,6 +1962,17 @@ button:disabled {
   padding: 12px;
 }
 
+.info-message {
+  color: #1d4ed8;
+  font-size: 13px;
+  margin-top: 16px;
+  max-width: 600px;
+  background: #eff6ff;
+  border-left: 4px solid #60a5fa;
+  border-radius: 8px;
+  padding: 12px;
+}
+
 /* Storyboard */
 .storyboard {
   margin-top: 40px;
@@ -1608,6 +2011,18 @@ button:disabled {
   padding: 8px 20px;
 }
 
+.transition-note {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #d7d1bf;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(238, 231, 209, 0.95), rgba(246, 242, 232, 0.98));
+  color: #63553a;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .shots-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1625,6 +2040,250 @@ button:disabled {
 .shot-card:hover {
   border-color: #6c63ff;
   box-shadow: 0 2px 12px rgba(108, 99, 255, 0.1);
+}
+
+.transition-slot {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, rgba(255, 248, 235, 0.98), rgba(247, 241, 228, 0.98));
+  border: 1px dashed #d1b97c;
+  border-radius: 12px;
+  padding: 16px;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transition-slot::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #b7852d, #e1ca8a);
+}
+
+.transition-slot.ready {
+  border-style: solid;
+  border-color: #b7852d;
+  box-shadow: 0 8px 24px rgba(183, 133, 45, 0.12);
+}
+
+.transition-slot-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.transition-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.transition-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.transition-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a07018;
+}
+
+.transition-pair {
+  font-size: 11px;
+  color: #8b7750;
+  text-align: right;
+  word-break: break-word;
+}
+
+.transition-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #4f3d1d;
+}
+
+.transition-status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(116, 103, 81, 0.12);
+  color: #7f6d49;
+  border: 1px solid rgba(116, 103, 81, 0.18);
+}
+
+.transition-status-badge.ready {
+  background: rgba(183, 133, 45, 0.15);
+  color: #87590f;
+  border-color: rgba(183, 133, 45, 0.3);
+}
+
+.transition-preview-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.transition-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transition-frame-label {
+  font-size: 10px;
+  color: #8f7d59;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.transition-frame-image,
+.transition-frame-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+}
+
+.transition-frame-image {
+  object-fit: cover;
+  border: 1px solid rgba(177, 152, 97, 0.22);
+  box-shadow: 0 8px 20px rgba(116, 93, 44, 0.08);
+}
+
+.transition-frame-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #907f5d;
+  background:
+    linear-gradient(135deg, rgba(255, 252, 245, 0.9), rgba(239, 232, 214, 0.9));
+  border: 1px dashed rgba(177, 152, 97, 0.35);
+}
+
+.transition-arrow-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.transition-arrow-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(183, 133, 45, 0.15), rgba(183, 133, 45, 0.92));
+}
+
+.transition-arrow-line::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid #b7852d;
+  border-right: 2px solid #b7852d;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.transition-arrow-text {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b7852d;
+}
+
+.transition-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6c5b3b;
+}
+
+.transition-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.transition-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(79, 61, 29, 0.08);
+  color: #5e4a27;
+  font-size: 11px;
+  border: 1px solid rgba(79, 61, 29, 0.12);
+}
+
+.transition-pill {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(122, 106, 69, 0.08);
+  color: #8c7d5a;
+  font-size: 11px;
+  border: 1px solid rgba(122, 106, 69, 0.14);
+}
+
+.transition-pill.active {
+  background: rgba(183, 133, 45, 0.15);
+  color: #7a5311;
+  border-color: rgba(183, 133, 45, 0.35);
+}
+
+.transition-btn {
+  margin-top: 4px;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: #b7852d;
+  color: #fffaf1;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s, transform 0.2s;
+}
+
+.transition-btn:hover {
+  background: #9f711f;
+  transform: translateY(-1px);
+}
+
+.transition-btn.disabled {
+  background: #cdb88c;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.transition-action-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.transition-hint {
+  font-size: 11px;
+  color: #8f7f5c;
 }
 
 .shot-header {
@@ -1728,6 +2387,37 @@ button:disabled {
   width: 100%;
   border-radius: 6px;
   margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .transition-slot-top {
+    flex-direction: column;
+  }
+
+  .transition-pair {
+    text-align: left;
+  }
+
+  .transition-preview-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .transition-arrow-wrap {
+    min-height: 42px;
+  }
+
+  .transition-arrow-line {
+    width: 2px;
+    height: 28px;
+    background: linear-gradient(180deg, rgba(183, 133, 45, 0.15), rgba(183, 133, 45, 0.92));
+  }
+
+  .transition-arrow-line::after {
+    top: auto;
+    right: 50%;
+    bottom: -1px;
+    transform: translateX(50%) rotate(135deg);
+  }
 }
 /* 导出完整视频按钮 */
 .concat-btn {

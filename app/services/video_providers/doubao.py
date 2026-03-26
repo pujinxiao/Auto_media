@@ -154,6 +154,7 @@ class DoubaoVideoProvider(BaseVideoProvider):
         api_key: str,
         base_url: str,
         last_frame_url: str = "",
+        negative_prompt: str = "",
     ) -> str:
         """生成视频。
 
@@ -168,6 +169,9 @@ class DoubaoVideoProvider(BaseVideoProvider):
         Returns:
             视频URL
         """
+        # Seedance does not provide a native negative prompt field. Keep this
+        # parameter for provider compatibility but ignore it here.
+        del negative_prompt
         effective_base = base_url or DEFAULT_BASE_URL
         async with httpx.AsyncClient(timeout=30) as client:
             task_id = await self._submit(

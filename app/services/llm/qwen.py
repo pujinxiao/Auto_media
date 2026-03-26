@@ -8,28 +8,57 @@ class QwenProvider(BaseLLMProvider):
         self._model = model
 
     async def complete(self, system: str, user: str, temperature: float = 0.3) -> str:
-        resp = await self._client.chat.completions.create(
-            model=self._model,
-            temperature=temperature,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
-        return resp.choices[0].message.content
+        text, _ = await self.complete_with_usage(system, user, temperature)
+        return text
 
     async def complete_with_usage(self, system: str, user: str, temperature: float = 0.3) -> tuple[str, dict]:
-        resp = await self._client.chat.completions.create(
+        return await self.complete_messages_with_usage(
+            messages=[{"role": "user", "content": user}],
+            system=system,
+            temperature=temperature,
+        )
+
+    async def complete_messages_with_usage(
+        self,
+        messages: list[dict],
+        system: str = "",
+        temperature: float = 0.3,
+        enable_caching: bool = False,
+        cache_key: str = "",
+        cache_threshold_tokens: int = 1024,
+    ) -> tuple[str, dict]:
+        del enable_caching, cache_key, cache_threshold_tokens
+        request_messages = [
+            {"role": message.get("role", "user"), "content": message.get("content", "")}
+            for message in messages
+        ]
+        if system:
+            request_messages = [{"role": "system", "content": system}, *request_messages]
+
+        stream = await self._client.chat.completions.create(
             model=self._model,
             temperature=temperature,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=request_messages,
+            stream=True,
+            stream_options={"include_usage": True},
         )
-        usage_obj = getattr(resp, "usage", None)
+
+        chunks: list[str] = []
+        prompt_tokens = 0
+        completion_tokens = 0
+        async for chunk in stream:
+            choices = getattr(chunk, "choices", None) or []
+            if choices:
+                delta = getattr(choices[0].delta, "content", None)
+                if delta:
+                    chunks.append(delta)
+            usage_obj = getattr(chunk, "usage", None)
+            if usage_obj:
+                prompt_tokens += getattr(usage_obj, "prompt_tokens", 0) or 0
+                completion_tokens += getattr(usage_obj, "completion_tokens", 0) or 0
+
         usage = {
-            "prompt_tokens": usage_obj.prompt_tokens if usage_obj else 0,
-            "completion_tokens": usage_obj.completion_tokens if usage_obj else 0,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
         }
-        return resp.choices[0].message.content, usage
+        return "".join(chunks), usage

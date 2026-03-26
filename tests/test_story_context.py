@@ -8,6 +8,7 @@ from app.core.story_assets import build_character_asset_record, get_character_de
 from app.core.story_context import _GENRE_STYLE_RULES, build_generation_payload, build_story_context, character_appears_in_shot
 from app.models.story import Story
 from app.schemas.storyboard import AudioReference, CameraSetup, Shot, VisualElements
+from app.services import story_context_service
 from app.services import story_repository as repo
 from app.routers.image import _build_basic_payload
 from app.services.story_context_service import prepare_story_context, _parse_json
@@ -160,7 +161,6 @@ class StoryContextTests(unittest.TestCase):
 
     def test_genre_fallback_style_still_applies_when_scene_cache_keywords_do_not_match(self):
         story = {
-            "genre": "鍙ら",
             "meta": {
                 "scene_style_cache": [
                     {
@@ -553,6 +553,9 @@ class StoryContextPreparationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StoryContextServiceParsingTests(unittest.TestCase):
+    def tearDown(self):
+        story_context_service._story_context_locks.clear()
+
     def test_parse_json_extracts_first_fenced_block(self):
         content = """
         Intro text
@@ -567,6 +570,16 @@ class StoryContextServiceParsingTests(unittest.TestCase):
         parsed = _parse_json(content)
 
         self.assertEqual(parsed["characters"]["Li Ming"]["body"], "short black hair")
+
+    def test_get_story_context_lock_prunes_stale_entries(self):
+        with patch("app.services.story_context_service._STORY_CONTEXT_LOCK_TTL_SECONDS", 1.0):
+            with patch("app.services.story_context_service.monotonic", side_effect=[0.0, 2.0]):
+                first_lock = story_context_service._get_story_context_lock("story-1")
+                second_lock = story_context_service._get_story_context_lock("story-2")
+
+        self.assertIsNot(first_lock, second_lock)
+        self.assertNotIn("story-1", story_context_service._story_context_locks)
+        self.assertIn("story-2", story_context_service._story_context_locks)
 
 
 class StoryAssetHelperTests(unittest.TestCase):

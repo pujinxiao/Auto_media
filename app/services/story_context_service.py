@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from dataclasses import dataclass
 import json
+import logging
 import re
+from time import monotonic
 from typing import Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +27,17 @@ from app.services.llm.factory import get_llm_provider
 
 
 _logger = logging.getLogger(__name__)
-_story_context_locks: dict[str, asyncio.Lock] = {}
+
+
+@dataclass
+class _StoryContextLockEntry:
+    lock: asyncio.Lock
+    last_used: float
+
+
+_STORY_CONTEXT_LOCK_TTL_SECONDS = 900.0
+_STORY_CONTEXT_LOCK_MAXSIZE = 512
+_story_context_locks: dict[str, _StoryContextLockEntry] = {}
 
 
 APPEARANCE_SYSTEM_PROMPT = """
@@ -101,6 +113,44 @@ def _parse_json(content: str) -> dict[str, Any]:
     elif normalized.startswith("```"):
         normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
     return json.loads(normalized.strip())
+
+
+def _prune_story_context_locks(now: float | None = None) -> None:
+    current_time = monotonic() if now is None else now
+    stale_story_ids = [
+        story_id
+        for story_id, entry in _story_context_locks.items()
+        if not entry.lock.locked() and current_time - entry.last_used > _STORY_CONTEXT_LOCK_TTL_SECONDS
+    ]
+    for story_id in stale_story_ids:
+        _story_context_locks.pop(story_id, None)
+
+    if len(_story_context_locks) <= _STORY_CONTEXT_LOCK_MAXSIZE:
+        return
+
+    removable_entries = sorted(
+        (
+            (entry.last_used, story_id)
+            for story_id, entry in _story_context_locks.items()
+            if not entry.lock.locked()
+        ),
+        key=lambda item: item[0],
+    )
+    while len(_story_context_locks) > _STORY_CONTEXT_LOCK_MAXSIZE and removable_entries:
+        _, story_id = removable_entries.pop(0)
+        _story_context_locks.pop(story_id, None)
+
+
+def _get_story_context_lock(story_id: str) -> asyncio.Lock:
+    now = monotonic()
+    _prune_story_context_locks(now)
+    entry = _story_context_locks.get(story_id)
+    if entry is None:
+        entry = _StoryContextLockEntry(lock=asyncio.Lock(), last_used=now)
+        _story_context_locks[story_id] = entry
+    else:
+        entry.last_used = now
+    return entry.lock
 
 
 def _missing_appearance_cache_names(story: Mapping[str, Any]) -> set[str]:
@@ -312,7 +362,7 @@ async def prepare_story_context(
         return {}, None
 
     can_call_llm = bool(provider) and _has_effective_llm_credentials(provider, api_key)
-    story_lock = _story_context_locks.setdefault(story_id, asyncio.Lock())
+    story_lock = _get_story_context_lock(story_id)
 
     if can_call_llm:
         async with story_lock:

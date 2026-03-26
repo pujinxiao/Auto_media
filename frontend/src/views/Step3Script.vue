@@ -41,12 +41,12 @@
         开始生成剧本 ✨
       </button>
 
-      <div v-if="error && !started" class="error-tip">{{ error }}</div>
+      <div v-if="error && !started" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
 
       <div v-if="started" class="script-section">
         <h2>剧本</h2>
         <SceneStream :scenes="store.scenes" :streaming="streaming" />
-        <div v-if="error" class="error-tip">{{ error }}</div>
+        <div v-if="error" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
       </div>
 
       <div v-if="done" class="btn-row">
@@ -102,15 +102,16 @@ function isAuthError(msg) {
 async function startGenerate() {
   if (!settings.useMock && !settings.effectiveLlmApiKey) { showKeyModal.value = true; return }
   scriptAbortController?.abort()
-  scriptAbortController = new AbortController()
+  const controller = new AbortController()
+  scriptAbortController = controller
   streaming.value = true
   error.value = ''
   store.resetScenes()
-  await streamScript(
-    store.storyId,
-    (scene) => store.addScene(scene),
-    () => {
-      streaming.value = false
+  try {
+    await streamScript(
+      store.storyId,
+      (scene) => store.addScene(scene),
+      () => {
       if (!store.scenes.length) {
         store.step3Done = false
         error.value = '未生成有效剧本内容，请重试'
@@ -119,8 +120,7 @@ async function startGenerate() {
       store.step3Done = true
       store.setStep(4)
     },
-    (msg) => {
-      streaming.value = false
+      (msg) => {
       store.step3Done = false
       if (isAuthError(msg)) {
         keyModalType.value = 'invalid'
@@ -130,8 +130,14 @@ async function startGenerate() {
         error.value = msg || '生成失败，请重试'
       }
     },
-    scriptAbortController.signal
-  )
+      controller.signal
+    )
+  } finally {
+    streaming.value = false
+    if (scriptAbortController === controller) {
+      scriptAbortController = null
+    }
+  }
 }
 </script>
 

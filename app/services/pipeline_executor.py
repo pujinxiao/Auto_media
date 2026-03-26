@@ -304,6 +304,11 @@ class PipelineExecutor:
                     "storyboard_description": visual_prompt,
                     "image_prompt": visual_prompt,
                     "final_video_prompt": visual_prompt,
+                    "last_frame_prompt": visual_prompt,
+                    "visual_elements": {
+                        "subject_and_clothing": visual_prompt,
+                        "action_and_expression": visual_prompt,
+                    },
                 }
                 view_hint = infer_shot_view_hint(char_name, effective_shot)
                 suffix = f"; {view_hint}" if view_hint else ""

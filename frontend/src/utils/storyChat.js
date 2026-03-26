@@ -62,13 +62,7 @@ function splitSectionItems(text) {
     .map(item => item.replace(/^[、\-•\d.)．\s]+/, '').trim())
     .filter(Boolean)
 
-  const deduped = []
-  for (const item of items) {
-    if (!deduped.includes(item)) {
-      deduped.push(item)
-    }
-  }
-  return deduped
+  return [...new Set(items)]
 }
 
 function isDefaultStoryImpactItem(item) {

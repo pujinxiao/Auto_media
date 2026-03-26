@@ -492,7 +492,7 @@ def build_character_reference_anchor(
     if visual_dna_body:
         clothing = sanitize_default_clothing(
             "",
-            fallback_description=prompt_fallback_description,
+            fallback_description=composed_prompt_fallback_description,
         )
         merged = _merge_visual_bits(visual_dna_body, clothing)
         if merged:

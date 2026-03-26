@@ -178,6 +178,43 @@ class PipelineRuntimeHelperTests(unittest.TestCase):
         self.assertIn("match the shot's back view", prompt)
         self.assertNotIn("front view", prompt)
 
+    def test_legacy_character_prompt_enhancement_builds_richer_fallback_shot_when_shot_missing(self):
+        visual_prompt = "Side profile of Li Ming turning toward the doorway."
+        captured_shot = {}
+
+        def fake_infer_shot_view_hint(name, shot):
+            captured_shot.update(shot)
+            return ""
+
+        with (
+            patch("app.services.pipeline_executor.build_character_reference_anchor", return_value="young man, short black hair"),
+            patch("app.services.pipeline_executor.infer_shot_view_hint", side_effect=fake_infer_shot_view_hint),
+        ):
+            prompt = PipelineExecutor._enhance_prompt_with_character(
+                visual_prompt,
+                {
+                    "characters": [
+                        {
+                            "name": "Li Ming",
+                            "description": "young man, short black hair, wearing a dark blue robe.",
+                        }
+                    ],
+                    "character_images": {
+                        "Li Ming": {
+                            "design_prompt": "Character turnaround prompt for Li Ming",
+                        }
+                    },
+                },
+            )
+
+        self.assertIn("[Character Li Ming: young man, short black hair]", prompt)
+        self.assertEqual(captured_shot["storyboard_description"], visual_prompt)
+        self.assertEqual(captured_shot["image_prompt"], visual_prompt)
+        self.assertEqual(captured_shot["final_video_prompt"], visual_prompt)
+        self.assertEqual(captured_shot["last_frame_prompt"], visual_prompt)
+        self.assertEqual(captured_shot["visual_elements"]["subject_and_clothing"], visual_prompt)
+        self.assertEqual(captured_shot["visual_elements"]["action_and_expression"], visual_prompt)
+
 
 class PipelineStatusLookupTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

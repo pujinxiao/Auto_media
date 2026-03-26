@@ -10,6 +10,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -25,6 +26,7 @@ VIDEO_BASE_URL = (
     or os.getenv("DOUBAO_BASE_URL")
     or "https://ark.cn-beijing.volces.com/api/v3"
 )
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
 
 def _require_manual_env() -> None:
@@ -37,6 +39,13 @@ def _require_manual_env() -> None:
         raise RuntimeError(
             "Manual first/last-frame test requires env vars: " + ", ".join(missing)
         )
+
+
+def _normalize_media_url(image_url: str) -> str:
+    parsed = urlparse(image_url)
+    if parsed.scheme and parsed.netloc:
+        return image_url
+    return urljoin(f"{BASE_URL.rstrip('/')}/", image_url.lstrip("/"))
 
 
 async def run_single_frame_i2v():
@@ -56,7 +65,7 @@ async def run_single_frame_i2v():
     )
 
     video = await generate_video(
-        image_url=f"http://localhost:8000{first_frame['image_url']}",
+        image_url=_normalize_media_url(first_frame["image_url"]),
         prompt="The young man walks from the doorway to the desk and sits down.",
         shot_id="test_single_i2v",
         model="doubao-seedance-1-5-pro-251215",
@@ -98,14 +107,14 @@ async def run_first_last_frame_transition():
     )
 
     video = await generate_video(
-        image_url=f"http://localhost:8000{first_frame['image_url']}",
+        image_url=_normalize_media_url(first_frame["image_url"]),
         prompt="Transition naturally from standing to sitting in the chair.",
         shot_id="test_transition_video",
         model="doubao-seedance-1-5-pro-251215",
         video_api_key=VIDEO_API_KEY,
         video_base_url=VIDEO_BASE_URL,
         video_provider="doubao",
-        last_frame_url=f"http://localhost:8000{last_frame['image_url']}",
+        last_frame_url=_normalize_media_url(last_frame["image_url"]),
     )
 
     print(f"First frame: {first_frame['image_url']}")
@@ -142,14 +151,14 @@ async def run_scene_transition():
     )
 
     video = await generate_video(
-        image_url=f"http://localhost:8000{scene1_last['image_url']}",
+        image_url=_normalize_media_url(scene1_last["image_url"]),
         prompt="A smooth scene transition from the office to the meeting room.",
         shot_id="test_scene_transition",
         model="doubao-seedance-1-5-pro-251215",
         video_api_key=VIDEO_API_KEY,
         video_base_url=VIDEO_BASE_URL,
         video_provider="doubao",
-        last_frame_url=f"http://localhost:8000{scene2_first['image_url']}",
+        last_frame_url=_normalize_media_url(scene2_first["image_url"]),
     )
 
     print(f"Scene 1 last frame: {scene1_last['image_url']}")

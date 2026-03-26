@@ -400,6 +400,110 @@ class StoryContextPreparationTests(unittest.IsolatedAsyncioTestCase):
                 "young man, short black hair, slim build",
             )
 
+    async def test_prepare_story_context_only_merges_missing_appearance_cache_entries(self):
+        async with self.session_factory() as session:
+            await repo.save_story(
+                session,
+                "story-ctx-missing-appearance-only",
+                {
+                    "idea": "test",
+                    "genre": "历史",
+                    "tone": "沉稳",
+                    "selected_setting": "江南古镇，临河茶馆。",
+                    "characters": [
+                        {
+                            "name": "李明",
+                            "role": "主角",
+                            "description": "25岁青年男子，黑色短发，身形清瘦，穿着深蓝长衫。",
+                        },
+                        {
+                            "name": "阿月",
+                            "role": "配角",
+                            "description": "20岁年轻女子，长发，穿着浅青色襦裙。",
+                        },
+                    ],
+                    "character_images": {
+                        "李明": build_character_asset_record(
+                            image_url="/media/characters/li_ming.png",
+                            image_path="media/characters/li_ming.png",
+                            prompt="Full-body character design sheet for 李明",
+                            existing={"visual_dna": "young man, short black hair, slim build"},
+                        ),
+                        "阿月": build_character_asset_record(
+                            image_url="/media/characters/a_yue.png",
+                            image_path="media/characters/a_yue.png",
+                            prompt="Full-body character design sheet for 阿月",
+                        ),
+                    },
+                    "meta": {
+                        "character_appearance_cache": {
+                            "李明": {
+                                "body": "young man, short black hair, slim build",
+                                "clothing": "dark blue robe",
+                                "negative_prompt": "modern clothing",
+                            }
+                        }
+                    },
+                },
+            )
+
+            class FakeProvider:
+                async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                    if "stable visual anchors" in system:
+                        return (
+                            """
+                            {
+                              "characters": {
+                                "李明": {
+                                  "body": "tall young man, loose black hair",
+                                  "clothing": "light robe",
+                                  "negative_prompt": "armor"
+                                },
+                                "阿月": {
+                                  "body": "young woman, long black hair, slim build",
+                                  "clothing": "light cyan ruqun"
+                                }
+                              }
+                            }
+                            """.strip(),
+                            {"prompt_tokens": 20, "completion_tokens": 8},
+                        )
+                    return (
+                        '{"styles":[{"keywords":["teahouse"],"image_extra":"jiangnan teahouse","video_extra":"jiangnan teahouse"}]}',
+                        {"prompt_tokens": 8, "completion_tokens": 4},
+                    )
+
+            with patch("app.services.story_context_service.get_llm_provider", return_value=FakeProvider()):
+                story, _ = await prepare_story_context(
+                    session,
+                    "story-ctx-missing-appearance-only",
+                    provider="openai",
+                    model="gpt-4o-mini",
+                    api_key="test-key",
+                    base_url="https://example.com/v1",
+                )
+
+            self.assertEqual(
+                story["meta"]["character_appearance_cache"]["李明"]["body"],
+                "young man, short black hair, slim build",
+            )
+            self.assertEqual(
+                story["meta"]["character_appearance_cache"]["李明"]["clothing"],
+                "dark blue robe",
+            )
+            self.assertEqual(
+                story["meta"]["character_appearance_cache"]["阿月"]["body"],
+                "young woman, long black hair, slim build",
+            )
+            self.assertEqual(
+                story["character_images"]["李明"]["visual_dna"],
+                "young man, short black hair, slim build",
+            )
+            self.assertEqual(
+                story["character_images"]["阿月"]["visual_dna"],
+                "young woman, long black hair, slim build",
+            )
+
     async def test_prepare_story_context_uses_env_backfill_credentials(self):
         async with self.session_factory() as session:
             await repo.save_story(
@@ -478,6 +582,17 @@ class StoryAssetHelperTests(unittest.TestCase):
         self.assertEqual(record["design_prompt"], "Full-body character design sheet for Li Ming")
         self.assertEqual(record["asset_kind"], "character_sheet")
         self.assertEqual(record["framing"], "full_body")
+        self.assertEqual(record["visual_dna"], "young man, short black hair")
+
+    def test_character_asset_record_ignores_whitespace_visual_dna_updates(self):
+        record = build_character_asset_record(
+            image_url="/media/characters/li_ming.png",
+            image_path="media/characters/li_ming.png",
+            prompt="Full-body character design sheet for Li Ming",
+            existing={"visual_dna": "young man, short black hair"},
+            visual_dna="   ",
+        )
+
         self.assertEqual(record["visual_dna"], "young man, short black hair")
 
     def test_character_asset_getters_prefer_new_fields_and_keep_visual_dna(self):

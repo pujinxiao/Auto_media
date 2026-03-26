@@ -454,6 +454,10 @@ function resolveManualProjectId() {
   return manualProjectId.value
 }
 
+function effectiveStoryId() {
+  return manualStoryId.value || storyStore.storyId || manualProjectId.value
+}
+
 function rememberManualPipelineContext({ projectId, pipelineId, storyId } = {}) {
   if (projectId) manualProjectId.value = projectId
   if (pipelineId) manualPipelineId.value = pipelineId
@@ -859,7 +863,7 @@ async function parseStoryboard() {
         script,
         provider: settings.provider,
         model: settings.model,
-        ...(storyStore.storyId ? { story_id: storyStore.storyId } : {}),
+        story_id: effectiveStoryId(),
       })
     })
 
@@ -1071,7 +1075,7 @@ async function generateOneImage(shotId) {
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
         shots: [shot],
-        ...(storyStore.storyId ? { story_id: storyStore.storyId } : {}),
+        story_id: effectiveStoryId(),
         ...(settings.effectiveImageModel ? { model: settings.effectiveImageModel } : {}),
       })
     })
@@ -1175,7 +1179,7 @@ async function generateOneVideo(shotId) {
       headers: { 'Content-Type': 'application/json', ...getHeaders() },
       body: JSON.stringify({
         shots: [shot],
-        ...(storyStore.storyId ? { story_id: storyStore.storyId } : {}),
+        story_id: effectiveStoryId(),
         ...(settings.effectiveVideoModel ? { model: settings.effectiveVideoModel } : {}),
       })
     })

@@ -103,13 +103,20 @@ def _parse_json(content: str) -> dict[str, Any]:
     return json.loads(normalized.strip())
 
 
-def _needs_appearance_cache(story: Mapping[str, Any]) -> bool:
+def _missing_appearance_cache_names(story: Mapping[str, Any]) -> set[str]:
     characters = list(story.get("characters") or [])
     meta = dict(story.get("meta") or {})
     cached = dict(meta.get("character_appearance_cache") or {})
-    if not characters:
-        return False
-    return any(character.get("name") and character.get("name") not in cached for character in characters)
+    return {
+        name
+        for character in characters
+        for name in [character.get("name")]
+        if name and name not in cached
+    }
+
+
+def _needs_appearance_cache(story: Mapping[str, Any]) -> bool:
+    return bool(_missing_appearance_cache_names(story))
 
 
 def _needs_scene_style_cache(story: Mapping[str, Any]) -> bool:
@@ -313,6 +320,7 @@ async def prepare_story_context(
             if _needs_appearance_cache(story):
                 try:
                     appearance_cache = dict((story.get("meta") or {}).get("character_appearance_cache") or {})
+                    missing_names = _missing_appearance_cache_names(story)
                     extracted = await extract_character_appearance(
                         story,
                         provider=provider,
@@ -320,10 +328,15 @@ async def prepare_story_context(
                         api_key=api_key,
                         base_url=base_url,
                     )
+                    extracted = {
+                        name: value
+                        for name, value in extracted.items()
+                        if name in missing_names and name not in appearance_cache
+                    }
                     if extracted:
                         appearance_cache.update(extracted)
                         await repo.upsert_story_meta_cache(db, story_id, "character_appearance_cache", appearance_cache)
-                        await _project_visual_dna(db, story_id, story, appearance_cache)
+                        await _project_visual_dna(db, story_id, story, extracted)
                         story = await repo.get_story(db, story_id)
                 except Exception:
                     _logger.exception("Failed to extract character appearance cache for story_id=%s", story_id)

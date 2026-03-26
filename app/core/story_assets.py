@@ -43,6 +43,7 @@ def build_character_asset_record(
             "framing": "full_body",
         }
     )
-    if visual_dna:
-        record["visual_dna"] = _normalize_text(visual_dna)
+    normalized_visual_dna = _normalize_text(visual_dna)
+    if normalized_visual_dna:
+        record["visual_dna"] = normalized_visual_dna
     return record

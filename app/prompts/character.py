@@ -5,7 +5,7 @@
 """
 from typing import Optional
 
-from app.core.story_assets import get_character_visual_dna
+from app.core.story_assets import get_character_design_prompt, get_character_visual_dna
 
 
 # ============================================================================
@@ -38,6 +38,11 @@ def build_character_prompt(name: str, role: str, description: str) -> str:
 # 分镜角色参考信息块构建
 # ============================================================================
 
+
+def _get_character_anchor_text(character_images: dict, name: str) -> str:
+    return get_character_visual_dna(character_images, name) or get_character_design_prompt(character_images, name)
+
+
 def build_character_section(character_info: Optional[dict]) -> str:
     """构建传给分镜 LLM 的角色参考信息块。"""
     if not character_info:
@@ -53,7 +58,7 @@ def build_character_section(character_info: Optional[dict]) -> str:
         role = c.get("role", "")
         desc = c.get("description", "")
         lines.append(f"- **{name}**（{role}）：{desc}")
-        visual_dna = get_character_visual_dna(character_images, name)
-        if visual_dna:
-            lines.append(f"  Visual DNA: {visual_dna}")
+        visual_anchor = _get_character_anchor_text(character_images, name)
+        if visual_anchor:
+            lines.append(f"  Visual DNA: {visual_anchor}")
     return "\n".join(lines)

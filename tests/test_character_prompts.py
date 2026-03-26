@@ -5,17 +5,21 @@ from app.prompts.character import build_character_prompt, build_character_sectio
 
 class CharacterPromptTests(unittest.TestCase):
     def test_build_character_prompt_uses_standard_three_view_sheet(self):
-        prompt = build_character_prompt("李明", "主角", "青年男子，黑色短发，身形清瘦，穿着深蓝长衫。")
+        prompt = build_character_prompt("李明", "主角", "青年男子，黑色短发，身形清瘦，穿着深蓝长衫。")  # noqa: RUF001
 
         self.assertIn("Standard three-view character turnaround sheet for 李明", prompt)
         self.assertIn("front view, side profile, and back view", prompt)
         self.assertIn("full body in all three views", prompt)
+        self.assertIn("head-to-toe visible in every view", prompt)
+        self.assertIn("no text, no captions, no labels, no watermark, no logo", prompt)
+        self.assertIn("no foreground obstruction", prompt)
+        self.assertIn("same wearing position across all three views", prompt)
 
     def test_build_character_section_prefers_visual_dna(self):
         section = build_character_section(
             {
                 "characters": [
-                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
                 ],
                 "character_images": {
                     "char_li_ming": {
@@ -35,14 +39,14 @@ class CharacterPromptTests(unittest.TestCase):
         section = build_character_section(
             {
                 "characters": [
-                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},  # noqa: RUF001
                 ],
                 "character_images": {
                     "char_li_ming": {
                         "visual_dna": "young man, short black hair, slim build",
                         "design_prompt": (
                             "Standard three-view character turnaround sheet for 李明, protagonist, determined expression, heroic bearing, "
-                            "character description: 青年男子，黑色短发，穿着深蓝长衫。, "
+                            "character description: 青年男子，黑色短发，穿着深蓝长衫。, "  # noqa: RUF001
                             "show front view, side profile, and back view of the same character on one sheet"
                         ),
                         "character_id": "char_li_ming",
@@ -58,13 +62,13 @@ class CharacterPromptTests(unittest.TestCase):
         section = build_character_section(
             {
                 "characters": [
-                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},  # noqa: RUF001
                 ],
                 "character_images": {
                     "char_li_ming": {
                         "design_prompt": (
                             "Standard three-view character turnaround sheet for 李明, protagonist, determined expression, heroic bearing, "
-                            "character description: 青年男子，黑色短发，穿着深蓝长衫。, "
+                            "character description: 青年男子，黑色短发，穿着深蓝长衫。, "  # noqa: RUF001
                             "show front view, side profile, and back view of the same character on one sheet, "
                             "full body in all three views, neutral standing pose, clear silhouette, "
                             "consistent facial features and costume details across views, clean neutral backdrop, "
@@ -86,7 +90,7 @@ class CharacterPromptTests(unittest.TestCase):
         section = build_character_section(
             {
                 "characters": [
-                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},  # noqa: RUF001
                 ],
                 "character_images": {
                     "char_li_ming": {
@@ -99,6 +103,30 @@ class CharacterPromptTests(unittest.TestCase):
         )
 
         self.assertIn("Visual DNA: 青年男子, 黑色短发, 穿着深蓝长衫", section)
+
+    def test_build_character_section_uses_prompt_anchor_source_for_body_fallback(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "主角。"},
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "prompt": (
+                            "Legacy character turnaround prompt for 李明, 青年男子，黑色短发，身形清瘦，穿着深蓝长衫"  # noqa: RUF001
+                        ),
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    }
+                },
+            }
+        )
+
+        self.assertIn("Visual DNA:", section)
+        self.assertIn("青年男子", section)
+        self.assertIn("黑色短发", section)
+        self.assertIn("身形清瘦", section)
+        self.assertIn("穿着深蓝长衫", section)
 
 
 if __name__ == "__main__":

@@ -91,7 +91,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useStoryStore } from '../stores/story.js'
-import { refineStory } from '../api/story.js'
+import { patchStory, refineStory } from '../api/story.js'
 import CharacterChatPanel from './CharacterChatPanel.vue'
 import EpisodeChatPanel from './EpisodeChatPanel.vue'
 import { findCharacterByRef, getCharacterKey } from '../utils/character.js'
@@ -115,14 +115,31 @@ function startEdit(ep) {
   editSummary.value = ep.summary
 }
 
-function saveEdit() {
+async function saveEdit() {
   const ep = store.outline.find(e => e.episode === editingEp.value)
+  if (!ep) return
   const oldSummary = ep ? ep.summary : ''
   const epNum = editingEp.value
-  store.updateOutlineEpisode(epNum, editTitle.value, editSummary.value)
-  editingEp.value = null
-  refineStory(store.storyId, 'episode', `第${epNum}集剧情从「${oldSummary}」改为「${editSummary.value}」`)
-    .then(res => { if (res) store.applyRefine(res) })
+  const nextOutline = store.outline.map(item => (
+    item.episode === epNum
+      ? { ...item, title: editTitle.value, summary: editSummary.value }
+      : item
+  ))
+
+  try {
+    const patchResult = await patchStory(store.storyId, { outline: nextOutline })
+    if (!patchResult) throw new Error('patch story failed')
+    store.updateOutlineEpisode(epNum, editTitle.value, editSummary.value)
+    editingEp.value = null
+    const res = await refineStory(
+      store.storyId,
+      'episode',
+      `第${epNum}集剧情从「${oldSummary}」改为「${editSummary.value}」`
+    )
+    if (res) store.applyRefine(res)
+  } catch (error) {
+    console.error('[OutlinePreview] saveEdit 失败:', error)
+  }
 }
 
 function cancelEdit() {
@@ -134,17 +151,33 @@ function startEditChar(c) {
   editCharDesc.value = c.description
 }
 
-function saveEditChar(character) {
+async function saveEditChar(character) {
   if (!character?.id) {
     return
   }
   const key = character.id
   const c = findCharacterByRef(store.characters, character)
   const oldDesc = c ? c.description : ''
-  store.updateCharacter(key, { description: editCharDesc.value })
-  editingChar.value = null
-  refineStory(store.storyId, 'character', `角色「${character.name}」描述从「${oldDesc}」改为「${editCharDesc.value}」`)
-    .then(res => { if (res) store.applyRefine(res) })
+  const nextCharacters = store.characters.map(item => (
+    item.id === key
+      ? { ...item, description: editCharDesc.value }
+      : item
+  ))
+
+  try {
+    const patchResult = await patchStory(store.storyId, { characters: nextCharacters })
+    if (!patchResult) throw new Error('patch story failed')
+    store.updateCharacter(key, { description: editCharDesc.value })
+    editingChar.value = null
+    const res = await refineStory(
+      store.storyId,
+      'character',
+      `角色「${character.name}」描述从「${oldDesc}」改为「${editCharDesc.value}」`
+    )
+    if (res) store.applyRefine(res)
+  } catch (error) {
+    console.error('[OutlinePreview] saveEditChar 失败:', error)
+  }
 }
 
 function cancelEditChar() {

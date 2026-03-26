@@ -57,6 +57,8 @@ class GenerateOutlineResponse(BaseModel):
 class ChatRequest(BaseModel):
     story_id: str
     message: str
+    mode: Optional[Literal["generic", "character", "episode", "outline"]] = "generic"
+    context: Optional[dict] = None
 
 
 class GenerateScriptRequest(BaseModel):

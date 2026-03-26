@@ -19,11 +19,19 @@ def get_character_asset_entry(
     if not normalized_identifier:
         return {}
     entry = character_images.get(normalized_identifier)
+    normalized_name = _normalize_text(name)
+    if not isinstance(entry, Mapping) and normalized_name:
+        legacy_entry = character_images.get(normalized_name)
+        if isinstance(legacy_entry, Mapping):
+            entry = legacy_entry
     if not isinstance(entry, Mapping):
         for candidate in character_images.values():
             if not isinstance(candidate, Mapping):
                 continue
             if _normalize_text(candidate.get("character_id")) == normalized_identifier:
+                entry = candidate
+                break
+            if normalized_name and _normalize_text(candidate.get("character_name")) == normalized_name:
                 entry = candidate
                 break
     return dict(entry) if isinstance(entry, Mapping) else {}

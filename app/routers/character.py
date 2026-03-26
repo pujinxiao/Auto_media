@@ -64,14 +64,14 @@ async def generate_single(body: CharacterImageRequest, request: Request, image_c
 
     story = await repo.get_story(db, body.story_id)
     character_images = story.get("character_images", {}) if story else {}
-    character_key = body.character_id or body.character_name
+    character_key = body.character_id
     await repo.upsert_character_images(db, body.story_id, {
         character_key: build_character_asset_record(
             image_url=result["image_url"],
             image_path=result["image_path"],
             prompt=result["prompt"],
             existing=get_character_asset_entry(character_images, character_key, name=body.character_name),
-            character_id=body.character_id or "",
+            character_id=body.character_id,
             character_name=body.character_name,
         )
     })
@@ -121,7 +121,7 @@ async def generate_all(body: BatchCharacterRequest, request: Request, image_conf
             errors.append(CharacterImageError(character_name=char_name, error=result["error"]))
             continue
 
-        character_key = char_id or char_name
+        character_key = char_id
         new_images[character_key] = build_character_asset_record(
             image_url=result["image_url"],
             image_path=result["image_path"],

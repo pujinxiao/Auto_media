@@ -559,10 +559,15 @@ async function pollManualPipeline({ projectId, pipelineId, storyId, isDone, time
 async function restoreLatestPipelineState() {
   const projectId = manualProjectId.value || storyStore.storyId || ''
   const storyId = manualStoryId.value || storyStore.storyId || projectId
-  if (!projectId && !storyId) return
+  if (!projectId) {
+    if (storyId) {
+      console.warn('Skip restoring pipeline state because projectId is missing', { storyId })
+    }
+    return
+  }
 
   try {
-    const state = await getPipelineStatus(projectId || storyId, {
+    const state = await getPipelineStatus(projectId, {
       pipelineId: manualPipelineId.value,
       storyId,
     })

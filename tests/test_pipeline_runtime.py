@@ -141,6 +141,43 @@ class PipelineRuntimeHelperTests(unittest.TestCase):
 
         self.assertNotIn("match the shot's back view", prompt)
 
+    def test_legacy_character_prompt_enhancement_uses_structured_single_character_view_hint(self):
+        prompt = PipelineExecutor._enhance_prompt_with_character(
+            "Medium shot. Li Ming pauses at the doorway.",
+            {
+                "characters": [
+                    {
+                        "name": "Li Ming",
+                        "description": "young man, short black hair, wearing a dark blue robe.",
+                    }
+                ],
+                "character_images": {
+                    "Li Ming": {
+                        "design_prompt": (
+                            "Standard three-view character turnaround sheet for Li Ming, protagonist, determined expression, heroic bearing, "
+                            "character description: young man, short black hair, wearing a dark blue robe, "
+                            "show front view, side profile, and back view of the same character on one sheet, "
+                            "full body in all three views, neutral standing pose, clear silhouette, "
+                            "consistent facial features and costume details across views, clean neutral backdrop, "
+                            "production-ready character turnaround sheet, costume construction details, fabric texture, "
+                            "accessories, highly detailed, photorealistic"
+                        )
+                    }
+                },
+            },
+            {
+                "characters": [{"name": "Li Ming"}],
+                "storyboard_description": "A solitary figure pauses at the doorway.",
+                "visual_elements": {
+                    "subject_and_clothing": "young man in a dark blue robe at the doorway",
+                    "action_and_expression": "背影站立，微微侧头",
+                },
+            },
+        )
+
+        self.assertIn("match the shot's back view", prompt)
+        self.assertNotIn("front view", prompt)
+
 
 class PipelineStatusLookupTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

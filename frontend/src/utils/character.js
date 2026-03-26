@@ -1,5 +1,13 @@
 export function getCharacterKey(character = {}) {
-  return character?.id || character?.name || ''
+  const raw = character?.id != null && String(character.id).trim()
+    ? String(character.id)
+    : character?.name
+  const normalized = String(raw || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+  return normalized || ''
 }
 
 export function matchesCharacter(candidate = {}, target = {}) {
@@ -15,6 +23,19 @@ export function findCharacterImageEntry(characterImages = {}, character = {}) {
   const key = String(character?.id || '').trim()
   if (key && characterImages[key]) {
     return characterImages[key]
+  }
+  const legacyNameKey = String(character?.name || '').trim()
+  if (legacyNameKey && characterImages[legacyNameKey]) {
+    return characterImages[legacyNameKey]
+  }
+  for (const candidate of Object.values(characterImages || {})) {
+    if (!candidate || typeof candidate !== 'object') continue
+    if (key && String(candidate.character_id || '').trim() === key) {
+      return candidate
+    }
+    if (legacyNameKey && String(candidate.character_name || '').trim() === legacyNameKey) {
+      return candidate
+    }
   }
   return null
 }

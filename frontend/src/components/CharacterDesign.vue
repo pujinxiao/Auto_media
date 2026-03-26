@@ -30,7 +30,13 @@
                 <div v-if="!getCharacterData(char).imageUrl" class="placeholder-image">
                   <span>待生成</span>
                 </div>
-                <img v-else :src="getMediaUrl(getCharacterData(char).imageUrl)" :alt="char.name" class="character-image" />
+                <img
+                  v-else
+                  :src="getMediaUrl(getCharacterData(char).imageUrl)"
+                  :alt="char.name"
+                  class="character-image"
+                  @click="openPreview(char)"
+                />
 
                 <!-- 底部操作栏覆盖在图片上 -->
                 <div class="image-overlay-footer">
@@ -66,6 +72,17 @@
 
   <div v-if="error" class="error-tip">{{ error }}</div>
 
+  <div
+    v-if="previewImageUrl"
+    class="image-preview-modal"
+    @click.self="closePreview"
+  >
+    <div class="image-preview-dialog">
+      <button type="button" class="image-preview-close" @click="closePreview">×</button>
+      <img :src="previewImageUrl" :alt="previewCharacterName || '角色人设图预览'" class="image-preview-full" />
+    </div>
+  </div>
+
   <ApiKeyModal
     :show="showKeyModal"
     :type="keyModalType"
@@ -76,7 +93,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useStoryStore } from '../stores/story.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { generateCharacterImage, generateAllCharacterImages, getCharacterImages } from '../api/story.js'
@@ -107,6 +124,8 @@ const error = ref('')
 const showKeyModal = ref(false)
 const keyModalType = ref('missing')
 const keyModalMsg = ref('')
+const previewImageUrl = ref('')
+const previewCharacterName = ref('')
 
 function isAuthError(msg) {
   return /401|403|invalid|incorrect|unauthorized|api.?key/i.test(msg)
@@ -156,6 +175,24 @@ function next() {
 
 function goTo(index) {
   currentIndex.value = index
+}
+
+function openPreview(char) {
+  const imageUrl = getCharacterData(char).imageUrl
+  if (!imageUrl) return
+  previewImageUrl.value = getMediaUrl(imageUrl)
+  previewCharacterName.value = char?.name || ''
+}
+
+function closePreview() {
+  previewImageUrl.value = ''
+  previewCharacterName.value = ''
+}
+
+function handleKeydown(event) {
+  if (event.key === 'Escape' && previewImageUrl.value) {
+    closePreview()
+  }
 }
 
 async function generateOne(char) {
@@ -271,16 +308,20 @@ async function loadExistingImages() {
 watch(() => store.storyId, (newId, oldId) => {
   if (newId !== oldId) {
     resetCharacterData()
+    closePreview()
     loadExistingImages()
   }
 })
 
 watch(() => props.characters.map(char => `${char.id || ''}:${char.name}`), () => {
   resetCharacterData()
+  closePreview()
   loadExistingImages()
 })
 
 onMounted(loadExistingImages)
+onMounted(() => document.addEventListener('keydown', handleKeydown))
+onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <style scoped>
@@ -323,7 +364,7 @@ onMounted(loadExistingImages)
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   padding-bottom: 24px;
 }
 
@@ -353,7 +394,7 @@ onMounted(loadExistingImages)
 .card-image-area {
   position: relative;
   width: 100%;
-  aspect-ratio: 3/4;
+  aspect-ratio: 3/4.8;
   border-radius: 12px;
   overflow: hidden;
   background: linear-gradient(135deg, #f0f0f0 0%, #e8e8e8 100%);
@@ -364,7 +405,7 @@ onMounted(loadExistingImages)
   top: 0;
   left: 0;
   right: 0;
-  padding: 14px 16px;
+  padding: 10px 12px;
   background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%);
   display: flex;
   justify-content: space-between;
@@ -405,7 +446,10 @@ onMounted(loadExistingImages)
 .character-image {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
+  padding: 38px 2px 60px;
+  cursor: zoom-in;
 }
 
 .image-overlay-footer {
@@ -413,7 +457,7 @@ onMounted(loadExistingImages)
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 20px 16px 16px;
+  padding: 14px 12px 12px;
   background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%);
   z-index: 2;
 }
@@ -445,12 +489,12 @@ onMounted(loadExistingImages)
 }
 
 .nav-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #fff;
-  color: #666;
-  font-size: 20px;
+  width: 20px;
+  height: 40px;
+  background: transparent;
+  color: #7a7a86;
+  font-size: 18px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   transition: all 0.2s;
@@ -458,17 +502,14 @@ onMounted(loadExistingImages)
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid #e8e8e8;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .nav-btn:hover:not(:disabled) {
-  background: #6c63ff;
-  color: #fff;
+  color: #6c63ff;
 }
 
 .nav-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.18;
   cursor: not-allowed;
 }
 
@@ -505,5 +546,79 @@ onMounted(loadExistingImages)
   color: #e53935;
   font-size: 13px;
   text-align: center;
+}
+
+.image-preview-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 12, 18, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.image-preview-dialog {
+  position: relative;
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  color: #444;
+  font-size: 28px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-preview-close:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.image-preview-full {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 84px);
+  object-fit: contain;
+  object-position: center;
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .card-image-area {
+    aspect-ratio: 3/4.6;
+  }
+
+  .character-image {
+    padding: 36px 2px 56px;
+  }
+
+  .image-preview-modal {
+    padding: 12px;
+  }
+
+  .image-preview-dialog {
+    padding: 14px;
+    max-height: calc(100vh - 24px);
+  }
+
+  .image-preview-full {
+    max-height: calc(100vh - 56px);
+  }
 }
 </style>

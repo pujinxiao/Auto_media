@@ -91,7 +91,8 @@
 ```text
 build_character_prompt()                  # app/prompts/character.py
   -> 生成标准三视图角色设定图 prompt（含 clean background / 三视图版式要求）
-  -> 写入 story.character_images[name]["design_prompt"]，并兼容写入 ["prompt"]
+  -> 写入 story.character_images[character_id]["design_prompt"]，并兼容写入 ["prompt"]
+  -> 读取时仍兼容 legacy story.character_images[name]，加载时应尽量映射回 character_id
 
 build_character_section()                # app/prompts/character.py
   -> 将清洗后的角色参考锚点拼进 Character Reference
@@ -1075,7 +1076,7 @@ Phase 1 的补充要求：
 ### Phase 2：增强能力
 
 13. 增加 `extract_character_appearance()` LLM 提取
-14. 回填 `character_images[name]["visual_dna"]`
+14. 回填 `character_images[character_id]["visual_dna"]`
 15. 可选新增 `Shot.characters_in_shot`
 16. 可选新增 `extract_scene_styles_from_world_summary()`
 
@@ -1100,7 +1101,7 @@ Phase 1 的补充要求：
 | `inject_art_style()` | 保留为兜底工具；主链路由 `build_generation_payload()` 分字段组装 |
 | `_enhance_prompt_with_character()` | 废弃但短期保留签名，避免外部调用报错 |
 | `build_character_section()` | 保留旧函数作为无 `StoryContext` 时兜底 |
-| `character_images[name]["visual_dna"]` | 作为兼容字段继续支持，但不再是唯一数据源 |
+| `character_images[character_id]["visual_dna"]` | 作为兼容字段继续支持，但不再是唯一数据源；读取时仍兼容 legacy `character_images[name]` |
 | Prompt Caching | 仅对支持的 provider 启用；不支持时自动忽略，不影响主流程 |
 | 无 `story_id` 的旧流程 | `StoryContext` 为 `None` 时退回原逻辑，不阻断旧接口 |
 
@@ -1112,7 +1113,7 @@ Phase 1 的补充要求：
 
 1. 运行期结构化缓存放在 `Story.meta["character_appearance_cache"]`
 2. world summary 读取 `Story.selected_setting`
-3. `character_images[name]["visual_dna"]` 作为兼容投影字段保留
+3. `character_images[character_id]["visual_dna"]` 作为兼容投影字段保留；legacy `character_images[name]` 仅保留读取兼容
 4. 保持 `image_prompt` / `final_video_prompt` / `last_frame_prompt` 三字段分工，不回退成单一 prompt
 5. 自动与手动链路同时接入 `StoryContext`
 6. 缓存写入与失效通过专用 helper 管理，不直接裸写 `meta`

@@ -1,5 +1,6 @@
 import { useSettingsStore } from '../stores/settings.js'
 import { useStoryStore } from '../stores/story.js'
+import { DEFAULT_ART_STYLE_PROMPT } from '../constants/artStylePresets.js'
 
 /**
  * 统一 Header 构建：
@@ -25,7 +26,7 @@ export function getHeaders() {
   if (settings.effectiveVideoProvider) headers['X-Video-Provider'] = settings.effectiveVideoProvider
   if (settings.effectiveVideoApiKey)  headers['X-Video-API-Key']  = settings.effectiveVideoApiKey
   if (settings.effectiveVideoBaseUrl) headers['X-Video-Base-URL'] = settings.effectiveVideoBaseUrl
-  if (story.artStyle) headers['X-Art-Style'] = encodeURIComponent(story.artStyle)
+  headers['X-Art-Style'] = encodeURIComponent((story.artStyle || DEFAULT_ART_STYLE_PROMPT).trim())
   return headers
 }
 
@@ -162,13 +163,16 @@ export async function applyChatChanges(storyId, changeType, chatHistory, current
   return res.json()
 }
 
-export async function streamChat(storyId, message, onChunk, onDone, onError, signal) {
+export async function streamChat(storyId, messageOrPayload, onChunk, onDone, onError, signal) {
   let res
+  const payload = typeof messageOrPayload === 'string'
+    ? { story_id: storyId, message: messageOrPayload }
+    : { story_id: storyId, ...(messageOrPayload || {}) }
   try {
     res = await fetch(getUrl('/chat'), {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ story_id: storyId, message }),
+      body: JSON.stringify(payload),
       signal,
     })
   } catch (e) {

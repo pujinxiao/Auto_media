@@ -229,7 +229,8 @@ class ExtractCharacterLock(dspy.Signature):
 
     character_id = dspy.InputField()
     character_name = dspy.InputField()
-    character_description = dspy.InputField()
+    role = dspy.InputField()
+    description = dspy.InputField()
     output: CharacterAppearance = dspy.OutputField()
 ```
 
@@ -241,7 +242,7 @@ class ExtractCharacterLock(dspy.Signature):
 
 ### 4.1.1 标准输入输出契约
 
-实施时统一使用以下输入：
+实施时统一使用以下输入；`Signature`、模块 `forward()`、调用侧 payload 都必须完全同名：
 
 ```json
 {
@@ -284,11 +285,12 @@ class AppearanceModule(dspy.Module):
         super().__init__()
         self.extractor = dspy.TypedPredictor(ExtractCharacterLock)
 
-    def forward(self, character_id: str, name: str, description: str):
+    def forward(self, character_id: str, character_name: str, role: str, description: str):
         return self.extractor(
             character_id=character_id,
-            character_name=name,
-            character_description=description,
+            character_name=character_name,
+            role=role,
+            description=description,
         )
 ```
 
@@ -588,10 +590,10 @@ ConsistencyConfig(
 
 ### Phase 2：接入 DSPy
 
-- 新增 DSPy 提取模块
-- 构建黄金样本集
-- 离线编译并导出
-- 在 `build_story_context()` 中消费编译结果
+- 在 `app/services/story_context_service.py` 新增 DSPy 提取入口，替换/包装 `extract_character_appearance()`
+- 在 `app/services/story_context_service.py` 侧维护黄金样本集构建、离线编译与导出流程
+- 生产环境只在 `app/services/story_context_service.py` 加载已编译结果并写回 `story.meta["character_appearance_cache"]`
+- `build_story_context()` 只消费已写入的缓存/编译结果，不负责提取、编译或运行时调用 DSPy
 
 完成标准：
 

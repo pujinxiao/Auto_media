@@ -76,8 +76,21 @@ const positions = computed(() => {
   })
 })
 
+const validCharacterIds = computed(() => {
+  return new Set(
+    props.characters
+      .map(character => String(character?.id || '').trim())
+      .filter(Boolean)
+  )
+})
+
 const displayRelationships = computed(() => {
-  const rels = props.relationships.filter(rel => rel.source_id && rel.target_id)
+  const rels = props.relationships.filter(rel => {
+    const sourceId = String(rel?.source_id || '').trim()
+    const targetId = String(rel?.target_id || '').trim()
+    if (!sourceId || !targetId) return false
+    return validCharacterIds.value.has(sourceId) && validCharacterIds.value.has(targetId)
+  })
   const seen = new Set()
   const relNodeKey = rel => ({
     source: rel.source_id,
@@ -101,6 +114,9 @@ const displayRelationships = computed(() => {
 
 function pos(identity) {
   const normalizedIdentity = String(identity || '').trim()
+  if (!validCharacterIds.value.has(normalizedIdentity)) {
+    return { x: CX.value, y: CY.value }
+  }
   const idIndex = props.characters.findIndex(c => String(c?.id || '').trim() === normalizedIdentity)
   if (idIndex >= 0) {
     return positions.value[idIndex]

@@ -469,7 +469,10 @@ def build_character_reference_anchor(
         if merged:
             return merged
 
-    body = sanitize_body_features(prompt_description, fallback_description=normalized_description)
+    body = sanitize_body_features(
+        prompt_description,
+        fallback_description=prompt_description or prompt_anchor_source or normalized_description,
+    )
     clothing = sanitize_default_clothing(
             "",
             fallback_description=normalized_description,
@@ -754,6 +757,8 @@ def infer_shot_view_hint(name: str, shot: ShotLike) -> str:
     if not character_appears_in_shot(name, shot):
         return ""
 
+    normalized_name = _collapse_spaces(name)
+    structured_names = _shot_character_names(shot)
     segments = [
         str(_shot_field(shot, "storyboard_description", "")),
         str(_shot_field(shot, "image_prompt", "")),
@@ -762,7 +767,7 @@ def infer_shot_view_hint(name: str, shot: ShotLike) -> str:
         _get_visual_field(shot, "subject_and_clothing"),
         _get_visual_field(shot, "action_and_expression"),
     ]
-    escaped_name = re.escape(_collapse_spaces(name))
+    escaped_name = re.escape(normalized_name)
     patterns = [
         re.compile(r"\b" + escaped_name + r"\b", flags=re.IGNORECASE),
         re.compile(escaped_name, flags=re.IGNORECASE),
@@ -783,6 +788,26 @@ def infer_shot_view_hint(name: str, shot: ShotLike) -> str:
                 if local_contexts:
                     break
             contexts.extend(local_contexts or [lowered_segment])
+
+    is_structured_single_character_shot = (
+        len(structured_names) == 1
+        and structured_names[0].casefold() == normalized_name.casefold()
+    )
+    if not contexts and is_structured_single_character_shot:
+        fallback_parts = [
+            _get_visual_field(shot, "action_and_expression"),
+            _get_visual_field(shot, "subject_and_clothing"),
+        ]
+        if not any(_collapse_spaces(part) for part in fallback_parts):
+            fallback_parts.extend(
+                [
+                    str(_shot_field(shot, "storyboard_description", "")),
+                    str(_shot_field(shot, "image_prompt", "")),
+                ]
+            )
+        fallback_context = _collapse_spaces(" ".join(str(part) for part in fallback_parts))
+        if fallback_context:
+            contexts.append(fallback_context.lower())
 
     scores = {"front": 0, "side": 0, "back": 0}
     for context in contexts:

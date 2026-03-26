@@ -35,7 +35,7 @@
 |------|------|------|
 | Step 1 | 灵感输入 | 创意输入、要素审计、返回建议追问维度 |
 | Step 2 | 世界构建 | 6 轮引导式问答，写入 `selected_setting` |
-| Step 3 | 故事生成 | 大纲、角色、关系、流式剧本、结构化 refine、apply-chat |
+| Step 3 | 故事生成 | 大纲、角色、关系、对话式修改建议、流式剧本、结构化 refine、apply-chat |
 | Step 3 扩展 | 角色与画风 | 角色三视图设定图、`art_style` 持久化 |
 | Step 4 | 预览导出 | 剧本预览、导出 JSON / 文本、`/story/{story_id}/finalize` |
 | Video | 视频生成 | 分镜、TTS、图片、图生视频、拼接、状态查询 |
@@ -82,6 +82,7 @@
 | `/api/v1/story/world-building/start` | `POST` | ✅ | 开始世界构建 |
 | `/api/v1/story/world-building/turn` | `POST` | ✅ | 继续世界构建 |
 | `/api/v1/story/generate-outline` | `POST` | ✅ | 生成大纲 / 角色 / 关系 |
+| `/api/v1/story/chat` | `POST` | ✅ | SSE 对话式修改建议，支持 `character / episode / outline` |
 | `/api/v1/story/generate-script` | `POST` | ✅ | SSE 剧本生成 |
 | `/api/v1/story/refine` | `POST` | ✅ | 结构化联动修改 |
 | `/api/v1/story/apply-chat` | `POST` | ✅ | 应用对话式局部修改 |
@@ -152,6 +153,9 @@
 - `character_images` 当前主口径为 `character_id -> asset`
 - `Character` 相关 API 已要求传入 `character_id`，禁止按角色名覆盖人设图
 - 手动 pipeline 当前依赖 `story_id + pipeline_id` 恢复状态，不再只靠前端内存
+- Step 3 AI 聊天默认不允许修改角色名字与主角/配角等 `role` 标签
+- 角色聊天应用只回写 `description`，剧情聊天只回写 `title / summary`
+- 前端手动修改角色描述或剧情大纲时，会先调用 `/story/patch` 落库，再调用 `/story/refine` 处理联动变更
 
 ---
 

@@ -151,6 +151,7 @@ Step2 世界构建
 
 Step3 大纲与剧本
   -> POST /api/v1/story/generate-outline
+  -> POST /api/v1/story/chat (SSE)
   -> POST /api/v1/story/generate-script (SSE)
   -> POST /api/v1/story/refine
   -> POST /api/v1/story/apply-chat
@@ -183,6 +184,7 @@ Video Generation
 | `POST` | `/api/v1/story/world-building/start` | 开始世界构建 |
 | `POST` | `/api/v1/story/world-building/turn` | 继续世界构建 |
 | `POST` | `/api/v1/story/generate-outline` | 生成大纲、角色、关系 |
+| `POST` | `/api/v1/story/chat` | SSE 对话式修改建议，支持 `character / episode / outline` 模式 |
 | `POST` | `/api/v1/story/generate-script` | 流式生成剧本 |
 | `POST` | `/api/v1/story/refine` | 结构化联动修改 |
 | `POST` | `/api/v1/story/apply-chat` | 应用对话式局部修改 |
@@ -221,6 +223,9 @@ Video Generation
 - 角色关系自动规范化 `source_id / target_id`
 - 角色设定图资产统一写入 `story.character_images`
 - `art_style` 前后端透传与持久化
+- Step 3 AI 修改助手已收敛为短文本结构化回复，角色聊天固定返回“当前角色修改 / 对剧情的影响”
+- AI 聊天不允许修改角色名字与主角/配角等标签，角色名仍以手动编辑为准
+- 手动修改角色描述与剧情大纲时，前端会先调用 `/story/patch` 持久化，再调用 `/story/refine` 做联动更新
 - `StoryContext` 已接入手动与自动视频主链路
 - 运行期会复用 `character_appearance_cache`、`scene_style_cache`、`visual_dna`
 - 手动与自动流水线共享数据库中的 `pipeline` 状态

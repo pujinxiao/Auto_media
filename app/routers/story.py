@@ -65,7 +65,14 @@ async def api_generate_outline(req: GenerateOutlineRequest, llm: dict = Depends(
 async def api_chat(req: ChatRequest, llm: dict = Depends(llm_config_dep), db: AsyncSession = Depends(get_db)):
     async def event_stream():
         try:
-            async for chunk in chat(req.story_id, req.message, db=db, **llm):
+            async for chunk in chat(
+                req.story_id,
+                req.message,
+                db=db,
+                mode=req.mode or "generic",
+                context=req.context,
+                **llm,
+            ):
                 yield f"data: {chunk}\n\n"
         except Exception as e:
             yield f"data: [ERROR] {str(e)}\n\n"
@@ -122,14 +129,19 @@ async def api_patch(req: PatchStoryRequest, db: AsyncSession = Depends(get_db)):
     fields = {}
     invalidate_appearance = False
     invalidate_scene_style = False
+    invalidate_script = False
     if req.characters is not None:
         fields["characters"] = req.characters
         invalidate_appearance = True
+        invalidate_script = True
     if req.outline is not None:
         fields["outline"] = req.outline
         invalidate_scene_style = True
+        invalidate_script = True
     if req.art_style is not None:
         fields["art_style"] = req.art_style
+    if invalidate_script:
+        fields["scenes"] = []
     if fields:
         await repo.save_story(db, req.story_id, fields)
     if invalidate_appearance or invalidate_scene_style:

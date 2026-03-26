@@ -19,6 +19,7 @@ Step 3   故事生成与修改
   OUTLINE_PROMPT
   SCRIPT_PROMPT
   REFINE_PROMPT
+  CHAT_SYSTEM_PROMPT + build_chat_messages()
   build_apply_chat_prompt()
 
 Step 4   分镜导演
@@ -40,7 +41,7 @@ Step 5   角色资产与运行期一致性
 | `app/prompts/story.py` | Step 1-3 的主 prompt 模板 |
 | `app/prompts/storyboard.py` | Step 4 分镜导演 prompt |
 | `app/prompts/character.py` | 角色三视图设定图 prompt 与角色参考段落拼装 |
-| `app/services/story_llm.py` | 灵感分析、世界构建、大纲、剧本、refine、apply-chat |
+| `app/services/story_llm.py` | 灵感分析、世界构建、大纲、剧本、chat、refine、apply-chat |
 | `app/services/storyboard.py` | 剧本转 Shot，兼容旧格式并补全缺省字段 |
 | `app/services/story_context_service.py` | 角色外貌缓存、场景风格缓存提取 |
 | `app/core/story_context.py` | 运行期角色/场景锚点清洗与 prompt 拼装 |
@@ -205,7 +206,20 @@ Step 5   角色资产与运行期一致性
 
 ### 5.4 对话式局部修改
 
-**入口**：`build_apply_chat_prompt()` + `apply_chat()`
+**入口**：`build_chat_messages()` + `/api/v1/story/chat` + `build_apply_chat_prompt()` + `apply_chat()`
+
+**聊天模式**：
+
+- `character`：返回 2 行纯文本
+  - `当前角色修改：...`
+  - `对剧情的影响：...`
+- `episode`：返回 2 行纯文本
+  - `当前剧情修改：...`
+  - `对后续剧情的影响：...`
+- `outline`：返回 3 行纯文本
+  - `当前大纲修改：...`
+  - `联动影响：...`
+  - `REFINE_JSON:{...}` 供前端隐藏读取
 
 **当前支持类型**：
 
@@ -214,11 +228,15 @@ Step 5   角色资产与运行期一致性
 
 **输出**：
 
-- 角色修改：`name / role / description`
+- 角色聊天展示层：只给结构化短建议，不给长篇分析，不输出代码块
+- 角色应用层：只修改 `description`
 - 集数修改：`title / summary`
 
 **当前实现说明**：
 
+- `CHAT_SYSTEM_PROMPT` 强制“顺着用户意图、少解释、少反驳、短文本分类输出”
+- 角色名字与 `role` 标签在 AI 聊天与 `apply_chat()` 中都被视为不可修改字段
+- `outline` 模式通过隐藏的 `REFINE_JSON` 单行结构，把建议展示和后续联动摘要分离
 - `apply_chat()` 从数据库读取当前权威对象后再写回
 - 角色修改会失效 `character_appearance_cache`
 - 集数修改会失效 `scene_style_cache`
@@ -345,7 +363,7 @@ full body in all three views, neutral standing pose, clear silhouette, ...
 
 ### 7.4 运行期 Prompt 拼装
 
-`build_generation_payload()` 当前会统一组装：
+`build_generation_payload()` 当前是运行期主组装入口，会统一产出：
 
 - `image_prompt`
 - `final_video_prompt`
@@ -354,10 +372,12 @@ full body in all three views, neutral standing pose, clear silhouette, ...
 
 当前行为：
 
-- 优先使用干净的 `character_appearance_cache`
-- 回退使用 `visual_dna`
-- 再回退到角色描述中的可见外貌信息
-- 自动清洗明显的非物理描述，避免把性格、命运、剧情摘要注入 prompt
+- `build_generation_payload()` 主链路会消费 `StoryContext.character_locks`，把干净的角色外观约束、场景风格和 `negative_prompt` 分字段组装，而不是把旧的人设图 prompt 整段透传
+- `StoryContext` 侧会优先消费干净的 `character_appearance_cache`，再回退到 `visual_dna`，最后才回退到角色描述中的可见外貌信息
+- 运行时兼容增强层会结合 `build_character_reference_anchor()` 提供清洗后的角色参考锚点，并用 `infer_shot_view_hint()` 识别镜头中的 front / side / back 视角提示，生成诸如 `match the shot's front view` / `side profile` / `back view` 的朝向约束
+- `build_character_reference_anchor()` 会清洗掉性格、命运、剧情摘要、studio/background 等非物理词，只保留体貌与默认服装；这些角色锚点与 `art_style`、`negative_prompt` 保持分离
+- `infer_shot_view_hint()` 只负责从镜头文本和结构化视觉字段中推断朝向提示，不参与 `art_style` 或污染排除词拼装
+- 因此完整运行链应理解为：`build_generation_payload()` 负责主字段组装，`build_character_reference_anchor()` / `infer_shot_view_hint()` 负责运行时角色锚点与朝向提示，两者共同构成最终的一致性注入层
 - `art_style` 与 `negative_prompt` 分离，不再混写
 - 场景缓存关键词未命中时，仍会回退到 `genre` 级风格规则
 

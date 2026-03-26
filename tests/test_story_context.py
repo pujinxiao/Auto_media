@@ -638,6 +638,25 @@ class StoryAssetHelperTests(unittest.TestCase):
         self.assertEqual(get_character_design_prompt(character_images, "Li Ming"), "new design prompt")
         self.assertEqual(get_character_visual_dna(character_images, "Li Ming"), "young man, short black hair")
 
+    def test_character_asset_getters_accept_legacy_name_key_when_loading_by_id(self):
+        character_images = {
+            "Li Ming": {
+                "prompt": "legacy prompt",
+                "design_prompt": "legacy design prompt",
+                "visual_dna": "young man, short black hair",
+                "character_name": "Li Ming",
+            }
+        }
+
+        self.assertEqual(
+            get_character_design_prompt(character_images, "char_li_ming", name="Li Ming"),
+            "legacy design prompt",
+        )
+        self.assertEqual(
+            get_character_visual_dna(character_images, "char_li_ming", name="Li Ming"),
+            "young man, short black hair",
+        )
+
 
 class StoryRepositoryHelperTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

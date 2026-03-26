@@ -95,6 +95,15 @@ export const useStoryStore = defineStore('story', {
         this.usage.completion_tokens += usage.completion_tokens
       }
     },
+    invalidateGeneratedScript({ keepProjectId = '', keepStoryId = '' } = {}) {
+      this.scenes = []
+      this.shots = []
+      this.step3Done = false
+      this.clearManualPipelineContext({
+        keepProjectId: keepProjectId || this.storyId || '',
+        keepStoryId: keepStoryId || this.storyId || '',
+      })
+    },
     setOutlineResult({ story_id, meta, characters, relationships, outline, usage }) {
       if (story_id && story_id !== this.storyId) {
         this.clearManualPipelineContext({
@@ -103,6 +112,10 @@ export const useStoryStore = defineStore('story', {
         })
       }
       this.storyId = story_id
+      this.invalidateGeneratedScript({
+        keepProjectId: story_id || '',
+        keepStoryId: story_id || '',
+      })
       if (meta != null) this.meta = meta
       if (characters != null && characters.length > 0) this.characters = characters
       if (relationships != null && relationships.length > 0) this.relationships = relationships
@@ -121,10 +134,7 @@ export const useStoryStore = defineStore('story', {
       }
     },
     resetScenes() {
-      this.scenes = []
-      this.shots = []
-      this.step3Done = false
-      this.clearManualPipelineContext({
+      this.invalidateGeneratedScript({
         keepProjectId: this.storyId || '',
         keepStoryId: this.storyId || '',
       })
@@ -135,13 +145,27 @@ export const useStoryStore = defineStore('story', {
     clearShots() { this.shots = [] },
     updateOutlineEpisode(episode, title, summary) {
       const ep = this.outline.find(e => e.episode === episode)
-      if (ep) { ep.title = title; ep.summary = summary }
+      if (ep) {
+        ep.title = title
+        ep.summary = summary
+        this.invalidateGeneratedScript()
+      }
     },
     updateCharacter(characterId, fields = {}) {
       const c = findCharacterByRef(this.characters, { id: characterId })
-      if (c) Object.assign(c, fields)
+      if (c) {
+        Object.assign(c, fields)
+        this.invalidateGeneratedScript()
+      }
     },
     applyRefine({ characters, relationships, outline, meta_theme, usage }) {
+      const touchedNarrative = (
+        (characters != null && characters.length > 0)
+        || (outline != null && outline.length > 0)
+      )
+      if (touchedNarrative) {
+        this.invalidateGeneratedScript()
+      }
       if (characters != null && characters.length > 0) {
         this.characters = mergeCharacters(this.characters, characters)
       }

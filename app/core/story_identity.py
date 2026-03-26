@@ -238,25 +238,30 @@ def normalize_story_record(
     story = deepcopy(dict(record or {}))
     existing_story = dict(existing_story or {})
 
-    if "characters" in story or "characters" in existing_story:
+    characters_source = story.get("characters") if "characters" in story else existing_story.get("characters")
+    if characters_source is not None or "characters" in story:
         story["characters"] = normalize_characters(
-            story.get("characters"),
+            characters_source,
             existing_characters=existing_story.get("characters"),
         )
 
-    if "relationships" in story or "relationships" in existing_story:
+    relationships_source = story.get("relationships") if "relationships" in story else existing_story.get("relationships")
+    if relationships_source is not None or "relationships" in story:
         story["relationships"] = normalize_relationships(
-            story.get("relationships"),
+            relationships_source,
             characters=story.get("characters"),
         )
 
-    if "character_images" in story or "character_images" in existing_story:
+    character_images_source = story.get("character_images") if "character_images" in story else existing_story.get("character_images")
+    if character_images_source is not None or "character_images" in story:
         story["character_images"] = normalize_character_images(
-            story.get("character_images"),
+            character_images_source,
             characters=story.get("characters"),
         )
 
-    meta = deepcopy(dict(story.get("meta") or {}))
+    meta = deepcopy(dict(existing_story.get("meta") or {}))
+    if "meta" in story and isinstance(story.get("meta"), Mapping):
+        meta.update(deepcopy(dict(story.get("meta") or {})))
     if "character_appearance_cache" in meta:
         meta["character_appearance_cache"] = normalize_character_appearance_cache(
             meta.get("character_appearance_cache"),

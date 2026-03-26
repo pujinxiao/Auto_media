@@ -29,10 +29,15 @@ def build_character_prompt(name: str, role: str, description: str) -> str:
         f"Standard three-view character turnaround sheet for {name}, {role_cue}, "
         f"character description: {description}, "
         "show front view, side profile, and back view of the same character on one sheet, "
-        "full body in all three views, neutral standing pose, clear silhouette, "
-        "consistent facial features and costume details across views, clean neutral backdrop, "
+        "full body in all three views, head-to-toe visible in every view, feet fully visible, "
+        "neutral standing pose, centered composition, clear silhouette, no cropping, no close-up framing, "
+        "consistent facial features, hairstyle, body proportions, and costume details across views, "
+        "if carrying accessories or bags, keep the same item design and the same wearing position across all three views, "
+        "clean neutral studio backdrop, plain background, no environmental props, no unrelated objects, "
+        "no floating elements, no foreground obstruction, no blocking objects, no decorative frame, "
+        "no text, no captions, no labels, no watermark, no logo, "
         "production-ready character turnaround sheet, costume construction details, fabric texture, "
-        "accessories, highly detailed, photorealistic"
+        "highly detailed, photorealistic"
     )
 
 

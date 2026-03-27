@@ -25,15 +25,20 @@ _COMMON_BINARY_DIRS = (
 @lru_cache(maxsize=None)
 def resolve_media_binary(binary_name: str) -> str:
     """解析 ffmpeg / ffprobe 可执行文件路径。"""
+    def _is_executable_file(path: Path) -> bool:
+        return path.is_file() and os.access(str(path), os.X_OK)
+
     env_name = f"{binary_name.upper()}_PATH"
     configured = os.getenv(env_name, "").strip()
     if configured:
         configured_path = Path(configured).expanduser()
-        if configured_path.exists():
+        if _is_executable_file(configured_path):
             return str(configured_path)
         resolved_configured = shutil.which(configured)
         if resolved_configured:
             return resolved_configured
+        if configured_path.exists():
+            raise RuntimeError(f"环境变量 {env_name} 指向的路径不是可执行文件: {configured}")
         raise RuntimeError(f"环境变量 {env_name} 指向的 {binary_name} 不存在: {configured}")
 
     resolved = shutil.which(binary_name)
@@ -42,7 +47,7 @@ def resolve_media_binary(binary_name: str) -> str:
 
     for directory in _COMMON_BINARY_DIRS:
         candidate = directory / binary_name
-        if candidate.exists():
+        if _is_executable_file(candidate):
             return str(candidate)
 
     raise RuntimeError(
@@ -300,7 +305,7 @@ async def concat_videos(
         Path(concat_list_path).unlink(missing_ok=True)
 
 
-def _url_to_local_path(url: str, base_url: str) -> str:
+def url_to_local_path(url: str, base_url: str) -> str:
     """将 URL 转换为本地相对路径。
 
     例如 http://localhost:8000/media/videos/x.mp4 → media/videos/x.mp4
@@ -311,3 +316,6 @@ def _url_to_local_path(url: str, base_url: str) -> str:
         path = path[len(base_url):]
     # 去掉前导斜杠
     return path.lstrip("/")
+
+
+_url_to_local_path = url_to_local_path

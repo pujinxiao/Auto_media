@@ -230,11 +230,33 @@ def _build_transition_prompt(
     to_payload: dict,
     user_hint: str,
 ) -> str:
+    from_camera = from_shot.get("camera_setup") or {}
+    to_camera = to_shot.get("camera_setup") or {}
+    from_visuals = from_shot.get("visual_elements") or {}
+    to_visuals = to_shot.get("visual_elements") or {}
+
+    def _camera_phrase(camera: dict) -> str:
+        shot_size = _collapse_spaces(str(camera.get("shot_size", "")))
+        angle = _collapse_spaces(str(camera.get("camera_angle", "")))
+        movement = _collapse_spaces(str(camera.get("movement", "")))
+        pieces = [piece for piece in (shot_size, angle, movement) if piece]
+        return ", ".join(pieces)
+
     bridge = _trim_words(str(to_shot.get("transition_from_previous", "")), 28)
     from_desc = _trim_words(str(from_shot.get("storyboard_description", "")), 18)
     to_desc = _trim_words(str(to_shot.get("storyboard_description", "")), 18)
+    from_frame = _trim_words(str(from_payload.get("image_prompt", "")), 20)
+    to_frame = _trim_words(str(to_payload.get("image_prompt", "")), 20)
     from_subject = _trim_words(str((from_shot.get("visual_elements") or {}).get("subject_and_clothing", "")), 12)
     to_subject = _trim_words(str((to_shot.get("visual_elements") or {}).get("subject_and_clothing", "")), 12)
+    from_action = _trim_words(str(from_visuals.get("action_and_expression", "")), 16)
+    to_action = _trim_words(str(to_visuals.get("action_and_expression", "")), 16)
+    from_environment = _trim_words(str(from_visuals.get("environment_and_props", "")), 16)
+    to_environment = _trim_words(str(to_visuals.get("environment_and_props", "")), 16)
+    from_lighting = _trim_words(str(from_visuals.get("lighting_and_color", "")), 16)
+    to_lighting = _trim_words(str(to_visuals.get("lighting_and_color", "")), 16)
+    from_camera_phrase = _trim_words(_camera_phrase(from_camera), 10)
+    to_camera_phrase = _trim_words(_camera_phrase(to_camera), 10)
     from_prompt = _trim_words(str(from_payload.get("final_video_prompt", "")), 18)
     to_prompt = _trim_words(str(to_payload.get("final_video_prompt", "")), 18)
     hint = _trim_words(user_hint, 18)
@@ -242,11 +264,26 @@ def _build_transition_prompt(
     parts = [
         "Short cinematic transition between two adjacent storyboard shots.",
         "Stay inside the same story beat and visual theme.",
-        f"Start from the exact ending state of: {from_desc or from_prompt or from_subject}.",
-        f"Arrive at the exact opening state of: {to_desc or to_prompt or to_subject}.",
+        f"Start from the exact ending frame of: {from_desc or from_frame or from_prompt or from_subject}.",
+        f"Arrive at the exact opening frame of: {to_desc or to_frame or to_prompt or to_subject}.",
+        "Create one smooth, physically plausible bridging motion instead of a hard jump.",
         "Keep identity, outfit, props, environment logic, lighting direction, and camera continuity consistent.",
         "Do not introduce new characters, unrelated props, new locations, costume changes, or off-theme action.",
     ]
+    if from_action or to_action:
+        parts.append(f"Action bridge: move naturally from {from_action or from_desc or from_prompt} into {to_action or to_desc or to_prompt}.")
+    if from_camera_phrase or to_camera_phrase:
+        parts.append(f"Camera continuity: begin with {from_camera_phrase or 'the current framing'} and settle into {to_camera_phrase or 'the destination framing'} with smooth motion.")
+    if from_environment or to_environment:
+        parts.append(
+            f"Environment continuity: preserve the visible space and props from {from_environment or from_desc} into {to_environment or to_desc} without abrupt layout changes."
+        )
+    if from_lighting or to_lighting:
+        parts.append(
+            f"Lighting continuity: keep the light direction and color stable from {from_lighting or 'the previous frame'} toward {to_lighting or 'the next frame'}."
+        )
+    if from_subject or to_subject:
+        parts.append(f"Subject continuity: keep the same appearance and silhouette from {from_subject or to_subject} to {to_subject or from_subject}.")
     if bridge:
         parts.append(f"Narrative bridge: {bridge}.")
     if hint:
@@ -874,7 +911,7 @@ async def generate_transition(
     db: AsyncSession = Depends(get_db),
 ):
     from app.services import ffmpeg, video
-    from app.services.ffmpeg import _url_to_local_path
+    from app.services.ffmpeg import url_to_local_path
 
     normalized_pipeline_id = _normalize_optional_id(req.pipeline_id)
     if not normalized_pipeline_id:
@@ -973,8 +1010,8 @@ async def generate_transition(
 
     transition_id = f"transition_{req.from_shot_id}__{req.to_shot_id}"
     base_url = str(request.base_url).rstrip("/")
-    from_video_path = _url_to_local_path(from_video_url, base_url)
-    to_video_path = _url_to_local_path(to_video_url, base_url)
+    from_video_path = url_to_local_path(from_video_url, base_url)
+    to_video_path = url_to_local_path(to_video_url, base_url)
     try:
         try:
             from_frame_path = await ffmpeg.extract_last_frame(
@@ -1014,6 +1051,8 @@ async def generate_transition(
 
         transition_video = await video.generate_transition_video(
             transition_id=transition_id,
+            # Provider-side parameter names are fixed: first_frame is the ending frame of from_shot,
+            # last_frame is the opening frame of to_shot for this transition bridge.
             first_frame_url=_absolute_media_url(from_frame_url, base_url),
             last_frame_url=_absolute_media_url(to_frame_url, base_url),
             prompt=transition_prompt,
@@ -1126,7 +1165,7 @@ async def concat_videos(
     story_id: str | None = Query(None, description="Stable story id for pipeline lookup"),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.services.ffmpeg import VIDEO_DIR, _url_to_local_path, concat_videos as do_concat
+    from app.services.ffmpeg import VIDEO_DIR, url_to_local_path, concat_videos as do_concat
 
     if not req.video_urls:
         raise HTTPException(status_code=400, detail="Video list is empty")
@@ -1134,7 +1173,7 @@ async def concat_videos(
     normalized_pipeline_id = _normalize_optional_id(pipeline_id)
     tracking_story_id = resolve_tracking_story_id(project_id, _normalize_optional_id(story_id))
     base_url = str(request.base_url).rstrip("/")
-    local_paths = [_url_to_local_path(url, base_url) for url in req.video_urls]
+    local_paths = [url_to_local_path(url, base_url) for url in req.video_urls]
     output_path = str(VIDEO_DIR / f"episode_{project_id}.mp4")
     resolved_story_id = tracking_story_id
 

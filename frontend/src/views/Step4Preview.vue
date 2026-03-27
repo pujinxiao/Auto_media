@@ -56,11 +56,7 @@ const totalScenes = computed(() =>
 )
 
 const readyEpisodeKeyArtCount = computed(() =>
-  store.scenes.filter(episode =>
-    (episode.scenes || []).some(scene =>
-      store.sceneReferenceAssets[store.getSceneKey(episode.episode, scene.scene_number)]?.status === 'ready'
-    )
-  ).length
+  store.scenes.filter(episode => store.getEpisodeSceneReferenceStatus(episode.episode) === 'ready').length
 )
 
 async function handleGenerateSceneKeyArt({ episode, scene }) {

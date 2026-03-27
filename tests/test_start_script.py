@@ -21,6 +21,7 @@ class StartScriptTests(unittest.TestCase):
     def test_detect_ffmpeg_install_command_uses_homebrew_on_macos(self):
         def fake_which(name, path=None):
             if name == "brew":
+                self.assertEqual(path, "/custom/bin")
                 return "/opt/homebrew/bin/brew"
             return None
 
@@ -28,7 +29,7 @@ class StartScriptTests(unittest.TestCase):
             patch("start.platform.system", return_value="Darwin"),
             patch("start.shutil.which", side_effect=fake_which),
         ):
-            cmd, installer_name = start.detect_ffmpeg_install_command()
+            cmd, installer_name = start.detect_ffmpeg_install_command({"PATH": "/custom/bin"})
 
         self.assertEqual(cmd, ["brew", "install", "ffmpeg"])
         self.assertEqual(installer_name, "Homebrew")

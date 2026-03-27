@@ -1110,6 +1110,38 @@ def _build_reference_images(
     return deduped[:2]
 
 
+def _merge_reference_images(*sources: Any) -> list[Any]:
+    merged: list[Any] = []
+    seen: set[tuple[str, str]] = set()
+
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            if isinstance(item, Mapping):
+                identity_value = (
+                    _collapse_spaces(str(item.get("id", "")))
+                    or _collapse_spaces(str(item.get("image_url", "")))
+                    or _collapse_spaces(str(item.get("image_path", "")))
+                )
+                if not identity_value:
+                    continue
+                identity = ("mapping", identity_value)
+                normalized_item = dict(item)
+            else:
+                value = _collapse_spaces(str(item))
+                if not value:
+                    continue
+                identity = ("raw", value)
+                normalized_item = item
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(normalized_item)
+
+    return merged
+
+
 def build_image_generation_prompt(
     shot: ShotLike,
     ctx: StoryContext | None,
@@ -1185,7 +1217,11 @@ def build_generation_payload(
     if negative_prompt:
         payload["negative_prompt"] = negative_prompt
 
-    reference_images = _build_reference_images(shot, story, scene_asset)
+    reference_images = _merge_reference_images(
+        _shot_field(shot, "reference_images", None),
+        payload.get("reference_images"),
+        _build_reference_images(shot, story, scene_asset),
+    )
     if reference_images:
         payload["reference_images"] = reference_images
 

@@ -8,6 +8,7 @@ from app.core.api_keys import video_config_dep, get_art_style, llm_config_dep
 from app.core.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.story_context import build_generation_payload
+from app.services import story_repository as repo
 from app.services.storyboard_state import (
     load_storyboard_generation_state,
     persist_generated_files_to_pipeline,
@@ -42,10 +43,10 @@ async def generate_videos(
 ):
     base_url = str(request.base_url).rstrip("/")
     art_style = get_art_style(request)
+    story = None
+    story_context = None
+    effective_pipeline_id = str(body.pipeline_id or "").strip()
     try:
-        story = None
-        story_context = None
-        effective_pipeline_id = str(body.pipeline_id or "").strip()
         if body.story_id:
             story, story_context = await prepare_story_context(
                 db,
@@ -68,6 +69,14 @@ async def generate_videos(
                     "negative_prompt": payload.get("negative_prompt", ""),
                 }
             )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Video payload build failed for project=%s story_id=%s", project_id, body.story_id)
+        detail = str(e).strip() or repr(e) or e.__class__.__name__
+        raise HTTPException(status_code=500, detail=f"视频生成失败: {detail}") from e
+
+    try:
         results = await generate_videos_batch(
             prepared_shots,
             base_url=base_url,
@@ -75,10 +84,18 @@ async def generate_videos(
             art_style=art_style,
             **video_config,
         )
-        if body.story_id and story:
-            generated_files = {
-                "videos": {result["shot_id"]: result for result in results},
-            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Video generation failed for project=%s story_id=%s", project_id, body.story_id)
+        detail = str(e).strip() or repr(e) or e.__class__.__name__
+        raise HTTPException(status_code=500, detail=f"视频生成失败: {detail}") from e
+
+    generated_files = {
+        "videos": {result["shot_id"]: result for result in results},
+    }
+    if body.story_id and story:
+        try:
             await persist_storyboard_generation_state(
                 db,
                 story_id=body.story_id,
@@ -89,18 +106,34 @@ async def generate_videos(
                 pipeline_id=effective_pipeline_id,
                 project_id=project_id,
             )
-            if effective_pipeline_id:
+        except Exception:
+            logger.exception(
+                "Video storyboard persistence failed project=%s story_id=%s pipeline_id=%s generated_files=%s",
+                project_id,
+                body.story_id,
+                effective_pipeline_id,
+                generated_files,
+            )
+    if effective_pipeline_id:
+        pipeline_story_id = str(body.story_id or "").strip()
+        try:
+            if not pipeline_story_id:
+                existing_pipeline = await repo.get_pipeline(db, effective_pipeline_id)
+                pipeline_story_id = str(existing_pipeline.get("story_id", "")).strip()
+            if pipeline_story_id:
                 await persist_generated_files_to_pipeline(
                     db,
                     project_id=project_id,
                     pipeline_id=effective_pipeline_id,
-                    story_id=body.story_id,
+                    story_id=pipeline_story_id,
                     generated_files=generated_files,
                 )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Video generation failed for project=%s story_id=%s", project_id, body.story_id)
-        detail = str(e).strip() or repr(e) or e.__class__.__name__
-        raise HTTPException(status_code=500, detail=f"视频生成失败: {detail}") from e
+        except Exception:
+            logger.exception(
+                "Video pipeline persistence failed project=%s story_id=%s pipeline_id=%s generated_files=%s",
+                project_id,
+                pipeline_story_id or body.story_id,
+                effective_pipeline_id,
+                generated_files,
+            )
     return results

@@ -70,11 +70,13 @@ def resolve_binary(binary_name, env):
     raise FileNotFoundError(f"未找到 {binary_name} 可执行文件")
 
 
-def detect_ffmpeg_install_command():
+def detect_ffmpeg_install_command(env=None):
+    runtime_env = env or build_runtime_env()
+    runtime_path = runtime_env.get("PATH")
     system = platform.system().lower()
-    if system == "darwin" and shutil.which("brew"):
+    if system == "darwin" and shutil.which("brew", path=runtime_path):
         return ["brew", "install", "ffmpeg"], "Homebrew"
-    if system == "linux" and shutil.which("apt-get"):
+    if system == "linux" and shutil.which("apt-get", path=runtime_path):
         return ["sudo", "apt-get", "install", "-y", "ffmpeg"], "apt-get"
     return None, None
 
@@ -106,7 +108,7 @@ def ensure_ffmpeg(env):
         ffmpeg_path = resolve_binary("ffmpeg", env)
         ffprobe_path = resolve_binary("ffprobe", env)
     except FileNotFoundError:
-        install_cmd, installer_name = detect_ffmpeg_install_command()
+        install_cmd, installer_name = detect_ffmpeg_install_command(env)
         if install_cmd and (should_auto_install_ffmpeg() or prompt_install_ffmpeg(installer_name)):
             print(f"\n[依赖] 正在通过 {installer_name} 安装 FFmpeg...")
             run(install_cmd, cwd=ROOT, env=env)

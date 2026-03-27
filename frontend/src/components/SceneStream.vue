@@ -149,6 +149,8 @@ function getEpisodeStatus(episodeNumber) {
   const groups = getEpisodeGroups(episodeNumber)
   if (groups.some(group => group.status === 'loading')) return 'loading'
   if (groups.some(group => group.status === 'failed')) return 'failed'
+  if (groups.some(group => group.status === 'stale')) return 'stale'
+  if (groups.some(group => group.status === 'idle')) return 'idle'
   if (groups.length > 0 && groups.every(group => group.status === 'ready')) return 'ready'
   return getEpisodeAsset(episodeNumber).status || 'idle'
 }

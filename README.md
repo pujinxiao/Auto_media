@@ -345,6 +345,5 @@ node --test frontend/src/utils/storyChat.test.js frontend/src/utils/storyChat.mu
 
 - [功能文档](./docs/feature-documentation.md)
 - [Prompt Framework](./docs/prompt-framework.md)
-- [主流程过渡视频接入说明](./docs/MAIN_FLOW_TRANSITION_INTEGRATION.md)
-- [场景参考图与单帧主链路重构方案](./docs/SCENE_REFERENCE_AND_SINGLE_FRAME_REFACTOR_PLAN.md)
+- [视频生成与视觉一致性统一文档](./docs/video-pipeline.md)
 - [端到端一致性实施方案](./docs/END_TO_END_CONSISTENCY_IMPLEMENTATION_PLAN.md)

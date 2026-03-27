@@ -375,6 +375,32 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(prepare_mock.await_args.args[1], "story-from-constructor")
 
+    async def test_pipeline_executor_updates_story_id_when_call_arg_provided(self):
+        executor = PipelineExecutor("legacy-project", "pipe-ctx-2", db=None, story_id="story-from-constructor")
+
+        with (
+            patch("app.services.pipeline_executor.prepare_story_context", new=AsyncMock(return_value=({}, None))) as prepare_mock,
+            patch("app.services.pipeline_executor.parse_script_to_storyboard", new=AsyncMock(return_value=([self._make_shot()], {}))),
+            patch.object(PipelineExecutor, "_run_separated_strategy", new=AsyncMock(return_value=None)),
+            patch.object(PipelineExecutor, "_stitch_videos", new=AsyncMock(return_value=None)),
+            patch("app.services.pipeline_executor.repo.save_pipeline", new=AsyncMock()),
+        ):
+            await executor.run_full_pipeline(
+                script="scene script",
+                strategy=GenerationStrategy.SEPARATED,
+                provider="openai",
+                model="gpt-test",
+                voice="zh-CN-XiaoxiaoNeural",
+                image_model="flux",
+                video_model="wan",
+                base_url="http://localhost:8000",
+                llm_api_key="test-key",
+                story_id="story-from-call",
+            )
+
+        self.assertEqual(prepare_mock.await_args.args[1], "story-from-call")
+        self.assertEqual(executor.story_id, "story-from-call")
+
     async def test_generate_storyboard_loads_context_from_tracking_story_id(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -748,6 +774,15 @@ class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):
             generate_transition_mock.await_args.kwargs["last_frame_url"],
             "http://testserver/media/images/transition_scene1_shot1__scene1_shot2_to_first.png",
         )
+        transition_prompt = generate_transition_mock.await_args.kwargs["prompt"]
+        self.assertIn("Action bridge:", transition_prompt)
+        self.assertIn("Camera continuity:", transition_prompt)
+        self.assertIn("Environment continuity:", transition_prompt)
+        self.assertIn("Lighting continuity:", transition_prompt)
+        self.assertIn("pauses before entering", transition_prompt)
+        self.assertIn("steps into the room and raises his gaze", transition_prompt)
+        self.assertIn("wooden doorway", transition_prompt)
+        self.assertIn("wooden room with a desk", transition_prompt)
         self.assertIn("transitions", status.generated_files)
         self.assertIn(result.transition_id, status.generated_files["transitions"])
         self.assertEqual(status.generated_files["timeline"][1]["item_type"], "transition")
@@ -1029,3 +1064,158 @@ class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pipeline["story_id"], story_id)
         self.assertEqual(persisted["story_id"], story_id)
+
+
+class SingleAssetPersistenceIsolationTests(unittest.IsolatedAsyncioTestCase):
+    def _make_request(self) -> Request:
+        return Request({"type": "http", "headers": []})
+
+    async def test_single_image_generation_returns_success_when_persistence_fails(self):
+        results = [
+            {
+                "shot_id": "scene1_shot1",
+                "image_path": "media/images/scene1_shot1.png",
+                "image_url": "/media/images/scene1_shot1.png",
+            }
+        ]
+
+        with (
+            patch(
+                "app.routers.image.prepare_story_context",
+                new=AsyncMock(return_value=({"meta": {"storyboard_generation": {"pipeline_id": "pipe-1"}}}, None)),
+            ),
+            patch("app.routers.image.generate_images_batch", new=AsyncMock(return_value=results)) as generate_batch,
+            patch(
+                "app.routers.image.persist_storyboard_generation_state",
+                new=AsyncMock(side_effect=RuntimeError("persist failed")),
+            ),
+            patch("app.routers.image.persist_generated_files_to_pipeline", new=AsyncMock()) as persist_pipeline,
+        ):
+            response = await generate_single_images(
+                project_id="project-1",
+                request=self._make_request(),
+                body=ImageRequest(
+                    shots=[{"shot_id": "scene1_shot1", "image_prompt": "Medium shot. Hero at doorway."}],
+                    story_id="story-1",
+                ),
+                image_config={"image_api_key": "", "image_base_url": ""},
+                llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": ""},
+                db=None,
+            )
+
+        self.assertEqual(response, results)
+        self.assertEqual(generate_batch.await_count, 1)
+        persist_pipeline.assert_not_awaited()
+
+    async def test_single_tts_generation_returns_success_when_persistence_fails(self):
+        results = [
+            {
+                "shot_id": "scene1_shot1",
+                "audio_url": "/media/audio/scene1_shot1.mp3",
+                "duration_seconds": 1.2,
+            }
+        ]
+
+        with (
+            patch("app.routers.tts.repo.get_story", new=AsyncMock(return_value={"meta": {"storyboard_generation": {"pipeline_id": "pipe-1"}}})),
+            patch("app.routers.tts.generate_tts_batch", new=AsyncMock(return_value=results)) as generate_batch,
+            patch(
+                "app.routers.tts.persist_storyboard_generation_state",
+                new=AsyncMock(side_effect=RuntimeError("persist failed")),
+            ),
+            patch("app.routers.tts.persist_generated_files_to_pipeline", new=AsyncMock()) as persist_pipeline,
+        ):
+            from app.routers.tts import TTSRequest, generate_audio
+
+            response = await generate_audio(
+                project_id="project-1",
+                body=TTSRequest(
+                    shots=[{"shot_id": "scene1_shot1", "dialogue": "你好"}],
+                    story_id="story-1",
+                ),
+                db=None,
+            )
+
+        self.assertEqual(response, results)
+        self.assertEqual(generate_batch.await_count, 1)
+        persist_pipeline.assert_not_awaited()
+
+    async def test_single_video_generation_persists_to_pipeline_without_story_context(self):
+        results = [
+            {
+                "shot_id": "scene1_shot1",
+                "video_url": "/media/videos/scene1_shot1.mp4",
+            }
+        ]
+
+        with (
+            patch("app.routers.video.generate_videos_batch", new=AsyncMock(return_value=results)) as generate_batch,
+            patch("app.routers.video.persist_storyboard_generation_state", new=AsyncMock()) as persist_storyboard,
+            patch("app.routers.video.persist_generated_files_to_pipeline", new=AsyncMock()) as persist_pipeline,
+            patch("app.routers.video.repo.get_pipeline", new=AsyncMock(return_value={"story_id": "story-from-pipeline"})),
+        ):
+            response = await generate_single_videos(
+                project_id="project-1",
+                request=self._make_request(),
+                body=VideoRequest(
+                    shots=[{"shot_id": "scene1_shot1", "image_url": "/media/images/scene1_shot1.png", "final_video_prompt": "test"}],
+                    pipeline_id="pipe-1",
+                ),
+                video_config={
+                    "video_api_key": "video-key",
+                    "video_base_url": "https://video.example/v1",
+                    "video_provider": "dashscope",
+                },
+                llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": ""},
+                db=None,
+            )
+
+        self.assertEqual(response, results)
+        self.assertEqual(generate_batch.await_count, 1)
+        persist_storyboard.assert_not_awaited()
+        persist_pipeline.assert_awaited_once()
+        self.assertEqual(persist_pipeline.await_args.kwargs["story_id"], "story-from-pipeline")
+
+    async def test_single_video_generation_returns_success_when_persistence_fails(self):
+        results = [
+            {
+                "shot_id": "scene1_shot1",
+                "video_url": "/media/videos/scene1_shot1.mp4",
+            }
+        ]
+
+        with (
+            patch(
+                "app.routers.video.prepare_story_context",
+                new=AsyncMock(return_value=({"meta": {"storyboard_generation": {"pipeline_id": "pipe-1"}}}, None)),
+            ),
+            patch("app.routers.video.generate_videos_batch", new=AsyncMock(return_value=results)) as generate_batch,
+            patch(
+                "app.routers.video.persist_storyboard_generation_state",
+                new=AsyncMock(side_effect=RuntimeError("story persist failed")),
+            ) as persist_storyboard,
+            patch(
+                "app.routers.video.persist_generated_files_to_pipeline",
+                new=AsyncMock(side_effect=RuntimeError("pipeline persist failed")),
+            ) as persist_pipeline,
+        ):
+            response = await generate_single_videos(
+                project_id="project-1",
+                request=self._make_request(),
+                body=VideoRequest(
+                    shots=[{"shot_id": "scene1_shot1", "image_url": "/media/images/scene1_shot1.png", "final_video_prompt": "test"}],
+                    story_id="story-1",
+                ),
+                video_config={
+                    "video_api_key": "video-key",
+                    "video_base_url": "https://video.example/v1",
+                    "video_provider": "dashscope",
+                },
+                llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": ""},
+                db=None,
+            )
+
+        self.assertEqual(response, results)
+        self.assertEqual(generate_batch.await_count, 1)
+        persist_storyboard.assert_awaited_once()
+        persist_pipeline.assert_awaited_once()

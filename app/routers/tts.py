@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
@@ -13,6 +14,7 @@ from app.services.storyboard_state import (
 from app.services.tts import generate_tts_batch, VOICES, DEFAULT_VOICE
 
 router = APIRouter(prefix="/api/v1/tts", tags=["tts"])
+logger = logging.getLogger(__name__)
 
 
 class TTSRequest(BaseModel):
@@ -44,14 +46,18 @@ async def generate_audio(
         raise HTTPException(status_code=400, detail=f"Unknown voice: {voice}")
     try:
         results = await generate_tts_batch(body.shots, voice=voice)
-        if body.story_id:
-            story = await repo.get_story(db, body.story_id)
-            if story:
-                generation_state = load_storyboard_generation_state(story)
-                effective_pipeline_id = str(body.pipeline_id or generation_state.get("pipeline_id", "") or "").strip()
-                generated_files = {
-                    "tts": {result["shot_id"]: result for result in results},
-                }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS 生成失败: {e}")
+
+    if body.story_id:
+        story = await repo.get_story(db, body.story_id)
+        if story:
+            generation_state = load_storyboard_generation_state(story)
+            effective_pipeline_id = str(body.pipeline_id or generation_state.get("pipeline_id", "") or "").strip()
+            generated_files = {
+                "tts": {result["shot_id"]: result for result in results},
+            }
+            try:
                 await persist_storyboard_generation_state(
                     db,
                     story_id=body.story_id,
@@ -70,6 +76,12 @@ async def generate_audio(
                         story_id=body.story_id,
                         generated_files=generated_files,
                     )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS 生成失败: {e}")
+            except Exception:
+                logger.exception(
+                    "TTS persistence failed project=%s story_id=%s pipeline_id=%s generated_files=%s",
+                    project_id,
+                    body.story_id,
+                    effective_pipeline_id,
+                    generated_files,
+                )
     return results

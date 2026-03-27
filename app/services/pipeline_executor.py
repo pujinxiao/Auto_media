@@ -75,6 +75,7 @@ class PipelineExecutor:
         self.story = None
         effective_story_id = (story_id or self.story_id or "").strip()
         if effective_story_id:
+            self.story_id = effective_story_id
             self.story, self.story_context = await prepare_story_context(
                 self.db,
                 effective_story_id,

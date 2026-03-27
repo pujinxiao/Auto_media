@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping
@@ -10,6 +11,7 @@ if TYPE_CHECKING:
 else:
     AsyncSession = Any
 
+logger = logging.getLogger(__name__)
 
 STORYBOARD_GENERATION_META_KEY = "storyboard_generation"
 _TRANSIENT_SHOT_KEYS = {"ttsLoading", "imageLoading", "videoLoading"}
@@ -25,7 +27,7 @@ def serialize_shot_for_storage(shot: Any) -> dict[str, Any]:
         data = dict(shot)
     return {
         key: deepcopy(value)
-        for key, value in dict(data).items()
+        for key, value in data.items()
         if key not in _TRANSIENT_SHOT_KEYS and key not in _DEPRECATED_SHOT_KEYS
     }
 
@@ -222,6 +224,12 @@ async def persist_storyboard_generation_state(
 
     normalized_story_id = str(story_id or "").strip()
     if not normalized_story_id:
+        logger.warning(
+            "Skipping storyboard_generation persistence because story_id is empty. story_id=%r pipeline_id=%r project_id=%r",
+            story_id,
+            pipeline_id,
+            project_id,
+        )
         return {}
     state = build_storyboard_generation_state(
         story,
@@ -257,22 +265,29 @@ async def persist_generated_files_to_pipeline(
     normalized_pipeline_id = str(pipeline_id or "").strip()
     normalized_story_id = str(story_id or "").strip()
     if not normalized_pipeline_id or not normalized_story_id:
+        logger.warning(
+            "Skipping pipeline generated_files persistence because pipeline_id/story_id is empty. pipeline_id=%r story_id=%r normalized_pipeline_id=%r normalized_story_id=%r",
+            pipeline_id,
+            story_id,
+            normalized_pipeline_id,
+            normalized_story_id,
+        )
         return {}
 
     existing_pipeline = await repo.get_pipeline(db, normalized_pipeline_id)
     merged_generated_files = _merge_generated_files(
-        existing_pipeline.get("generated_files") if isinstance(existing_pipeline, Mapping) else None,
+        existing_pipeline.get("generated_files"),
         generated_files,
     )
     if final_video_url is not None:
         merged_generated_files["final_video_url"] = final_video_url
 
     next_pipeline = {
-        "status": existing_pipeline.get("status") if existing_pipeline else None,
-        "progress": existing_pipeline.get("progress") if existing_pipeline else 0,
-        "current_step": existing_pipeline.get("current_step") if existing_pipeline else None,
-        "error": existing_pipeline.get("error") if existing_pipeline else None,
-        "progress_detail": existing_pipeline.get("progress_detail") if existing_pipeline else None,
+        "status": existing_pipeline.get("status"),
+        "progress": existing_pipeline.get("progress", 0),
+        "current_step": existing_pipeline.get("current_step"),
+        "error": existing_pipeline.get("error"),
+        "progress_detail": existing_pipeline.get("progress_detail"),
         "generated_files": merged_generated_files,
     }
 

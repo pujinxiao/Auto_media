@@ -63,10 +63,10 @@ async def generate_images(
     db: AsyncSession = Depends(get_db),
 ):
     art_style = get_art_style(request)
+    story = None
+    story_context = None
+    effective_pipeline_id = str(body.pipeline_id or "").strip()
     try:
-        story = None
-        story_context = None
-        effective_pipeline_id = str(body.pipeline_id or "").strip()
         if body.story_id:
             story, story_context = await prepare_story_context(
                 db,
@@ -83,38 +83,10 @@ async def generate_images(
             build_generation_payload(shot, story_context, art_style=art_style, story=story)
             for shot in body.shots
         ]
-        results = await generate_images_batch(
-            payloads,
-            model=body.model or DEFAULT_MODEL,
-            art_style=art_style,
-            **image_config,
-        )
-        if body.story_id and story:
-            generated_files = {
-                "images": {result["shot_id"]: result for result in results},
-            }
-            await persist_storyboard_generation_state(
-                db,
-                story_id=body.story_id,
-                story=story,
-                shots=body.shots,
-                partial_shots=True,
-                generated_files=generated_files,
-                pipeline_id=effective_pipeline_id,
-                project_id=project_id,
-            )
-            if effective_pipeline_id:
-                await persist_generated_files_to_pipeline(
-                    db,
-                    project_id=project_id,
-                    pipeline_id=effective_pipeline_id,
-                    story_id=body.story_id,
-                    generated_files=generated_files,
-                )
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Enhanced image generation failed for project=%s story_id=%s", project_id, body.story_id)
+        logger.exception("Enhanced image payload build failed for project=%s story_id=%s", project_id, body.story_id)
         if body.story_id:
             try:
                 effective_pipeline_id = ""
@@ -139,23 +111,32 @@ async def generate_images(
                     generated_files = {
                         "images": {result["shot_id"]: result for result in fallback_results},
                     }
-                    await persist_storyboard_generation_state(
-                        db,
-                        story_id=body.story_id,
-                        story=story,
-                        shots=body.shots,
-                        partial_shots=True,
-                        generated_files=generated_files,
-                        pipeline_id=effective_pipeline_id,
-                        project_id=project_id,
-                    )
-                    if effective_pipeline_id:
-                        await persist_generated_files_to_pipeline(
+                    try:
+                        await persist_storyboard_generation_state(
                             db,
-                            project_id=project_id,
-                            pipeline_id=effective_pipeline_id,
                             story_id=body.story_id,
+                            story=story,
+                            shots=body.shots,
+                            partial_shots=True,
                             generated_files=generated_files,
+                            pipeline_id=effective_pipeline_id,
+                            project_id=project_id,
+                        )
+                        if effective_pipeline_id:
+                            await persist_generated_files_to_pipeline(
+                                db,
+                                project_id=project_id,
+                                pipeline_id=effective_pipeline_id,
+                                story_id=body.story_id,
+                                generated_files=generated_files,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Image persistence failed after fallback generation project=%s story_id=%s pipeline_id=%s generated_files=%s",
+                            project_id,
+                            body.story_id,
+                            effective_pipeline_id,
+                            generated_files,
                         )
                 return fallback_results
             except HTTPException:
@@ -164,4 +145,50 @@ async def generate_images(
                 logger.exception("Fallback image generation also failed for project=%s story_id=%s", project_id, body.story_id)
         detail = str(e).strip() or repr(e) or e.__class__.__name__
         raise HTTPException(status_code=500, detail=f"图片生成失败: {detail}") from e
+
+    try:
+        results = await generate_images_batch(
+            payloads,
+            model=body.model or DEFAULT_MODEL,
+            art_style=art_style,
+            **image_config,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Image generation failed for project=%s story_id=%s", project_id, body.story_id)
+        detail = str(e).strip() or repr(e) or e.__class__.__name__
+        raise HTTPException(status_code=500, detail=f"图片生成失败: {detail}") from e
+
+    if body.story_id and story:
+        generated_files = {
+            "images": {result["shot_id"]: result for result in results},
+        }
+        try:
+            await persist_storyboard_generation_state(
+                db,
+                story_id=body.story_id,
+                story=story,
+                shots=body.shots,
+                partial_shots=True,
+                generated_files=generated_files,
+                pipeline_id=effective_pipeline_id,
+                project_id=project_id,
+            )
+            if effective_pipeline_id:
+                await persist_generated_files_to_pipeline(
+                    db,
+                    project_id=project_id,
+                    pipeline_id=effective_pipeline_id,
+                    story_id=body.story_id,
+                    generated_files=generated_files,
+                )
+        except Exception:
+            logger.exception(
+                "Image persistence failed project=%s story_id=%s pipeline_id=%s generated_files=%s",
+                project_id,
+                body.story_id,
+                effective_pipeline_id,
+                generated_files,
+            )
     return results

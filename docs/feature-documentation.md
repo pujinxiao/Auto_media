@@ -306,6 +306,5 @@
 1. `README.md`
 2. 本文档
 3. `docs/prompt-framework.md`
-4. `docs/SCENE_REFERENCE_AND_SINGLE_FRAME_REFACTOR_PLAN.md`
-5. `docs/MAIN_FLOW_TRANSITION_INTEGRATION.md`
-6. `app/routers/` 与 `app/services/`
+4. `docs/video-pipeline.md`
+5. `app/routers/` 与 `app/services/`

@@ -8,6 +8,7 @@ import re
 from typing import Any, Mapping, Optional
 
 from fastapi import HTTPException
+import httpx
 
 from app.core.api_keys import inject_art_style
 from app.core.story_context import StoryContext
@@ -19,6 +20,8 @@ SCENE_REFERENCE_NEGATIVE_PROMPT = (
     "silhouette, hands, full body, costume, outfit, weapon, text, watermark, logo, subtitles, overdesigned clutter, "
     "excessive props, split scene, collage"
 )
+
+SCENE_REFERENCE_IMAGE_TIMEOUT_SECONDS = 180
 
 LOCATION_SUFFIXES = (
     "楼顶花园",
@@ -111,15 +114,6 @@ LOCATION_SUFFIXES = (
     "走道",
     "现场",
 )
-
-GENERIC_PLACE_ANCHORS = {
-    "门口",
-    "入口",
-    "出口",
-    "楼道",
-    "走道",
-    "现场",
-}
 
 ENV_OBJECT_TERMS = (
     "朱红立柱",
@@ -319,7 +313,7 @@ def _collapse_spaces(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
-def _unique_values(values: list[Any], *, limit: int) -> list[str]:
+def _unique_normalized(values: list[Any], *, limit: int) -> list[str]:
     output: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -365,20 +359,6 @@ def _trim_anchor_prefix(anchor: str) -> str:
     return value
 
 
-def _unique_strings(values: list[str], *, limit: int) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = _collapse_spaces(value)
-        if not normalized or normalized in seen:
-            continue
-        output.append(normalized)
-        seen.add(normalized)
-        if len(output) >= limit:
-            break
-    return output
-
-
 def _extract_place_anchors(*texts: Any, limit: int = 6) -> list[str]:
     anchors: list[str] = []
     for text in texts:
@@ -399,10 +379,8 @@ def _extract_place_anchors(*texts: Any, limit: int = 6) -> list[str]:
                 candidate = _trim_anchor_prefix(combined[left : index + len(suffix)])
                 if candidate:
                     anchors.append(candidate)
-                    if candidate == suffix and suffix not in GENERIC_PLACE_ANCHORS:
-                        anchors.append(suffix)
                 search_from = index + len(suffix)
-    return _unique_strings(anchors, limit=limit)
+    return _unique_normalized(anchors, limit=limit)
 
 
 def _extract_object_anchors(*texts: Any, limit: int = 6) -> list[str]:
@@ -412,14 +390,14 @@ def _extract_object_anchors(*texts: Any, limit: int = 6) -> list[str]:
         if not combined:
             continue
         hits.extend(term for term in ENV_OBJECT_TERMS if term in combined)
-    return _unique_strings(hits, limit=limit)
+    return _unique_normalized(hits, limit=limit)
 
 
 def _build_environment_signature(environment: str, visual: str) -> str:
     place_anchors = _extract_place_anchors(environment, visual)
     object_anchors = _extract_object_anchors(environment, visual)
     if place_anchors or object_anchors:
-        return " ".join(_unique_strings(place_anchors + object_anchors, limit=8))
+        return " ".join(_unique_normalized(place_anchors + object_anchors, limit=8))
     return _remove_matching_noise(environment)
 
 
@@ -448,15 +426,15 @@ def _scene_environment_signature(scene: Mapping[str, Any]) -> str:
 
 
 def build_environment_group_signature(group_scenes: list[Mapping[str, Any]]) -> str:
-    place_anchors = _unique_strings(
+    place_anchors = _unique_normalized(
         [anchor for scene in group_scenes for anchor in _scene_place_anchors(scene)],
         limit=8,
     )
-    object_anchors = _unique_strings(
+    object_anchors = _unique_normalized(
         [anchor for scene in group_scenes for anchor in _scene_object_anchors(scene)],
         limit=8,
     )
-    fallback_signatures = _unique_strings([_scene_environment_signature(scene) for scene in group_scenes], limit=3)
+    fallback_signatures = _unique_normalized([_scene_environment_signature(scene) for scene in group_scenes], limit=3)
 
     parts: list[str] = []
     if place_anchors:
@@ -541,11 +519,11 @@ def _select_reusable_asset(
 
 
 def _group_environment_anchors(group_scenes: list[Mapping[str, Any]]) -> tuple[list[str], list[str]]:
-    place_anchors = _unique_strings(
+    place_anchors = _unique_normalized(
         [anchor for scene in group_scenes for anchor in _scene_place_anchors(scene)],
         limit=4,
     )
-    object_anchors = _unique_strings(
+    object_anchors = _unique_normalized(
         [anchor for scene in group_scenes for anchor in _scene_object_anchors(scene)],
         limit=4,
     )
@@ -681,7 +659,7 @@ def group_episode_scenes_by_environment(episode: int, episode_scenes: list[Mappi
         group["summary_environment"] = _top_value([scene["environment"] for scene in scenes]) or representative["environment"]
         group["summary_lighting"] = _top_value([scene["lighting"] for scene in scenes])
         group["summary_mood"] = _top_value([scene["mood"] for scene in scenes])
-        group["summary_visuals"] = _unique_values([scene["visual"] for scene in scenes], limit=2)
+        group["summary_visuals"] = _unique_normalized([scene["visual"] for scene in scenes], limit=2)
 
     return groups
 
@@ -704,10 +682,10 @@ def build_episode_environment_prompts(
         raise ValueError("group_scenes 不能为空")
 
     place_anchors, object_anchors = _group_environment_anchors(group_scenes)
-    environments = place_anchors or _unique_values([scene.get("environment", "") for scene in group_scenes], limit=2)
+    environments = place_anchors or _unique_normalized([scene.get("environment", "") for scene in group_scenes], limit=2)
     visuals = object_anchors
     lighting = _top_value([scene.get("lighting", "") for scene in group_scenes])
-    style_anchors = _unique_values(
+    style_anchors = _unique_normalized(
         [style.image_extra for style in (story_context.scene_styles if story_context else [])],
         limit=2,
     )
@@ -794,16 +772,25 @@ async def generate_episode_scene_reference(
         prompts = build_episode_environment_prompts(group["scenes"], story_context, art_style=art_style)
         variant_results: dict[str, dict[str, str]] = {}
         for variant, prompt_payload in prompts.items():
-            result = await generate_image(
-                prompt_payload["prompt"],
-                f"{group['environment_pack_key']}_{variant}",
-                model=effective_model,
-                image_api_key=image_api_key,
-                image_base_url=image_base_url,
-                negative_prompt=prompt_payload["negative_prompt"],
-                output_dir=EPISODE_DIR,
-                url_prefix="/media/episodes",
-            )
+            try:
+                result = await generate_image(
+                    prompt_payload["prompt"],
+                    f"{group['environment_pack_key']}_{variant}",
+                    model=effective_model,
+                    image_api_key=image_api_key,
+                    image_base_url=image_base_url,
+                    negative_prompt=prompt_payload["negative_prompt"],
+                    output_dir=EPISODE_DIR,
+                    url_prefix="/media/episodes",
+                    timeout_seconds=SCENE_REFERENCE_IMAGE_TIMEOUT_SECONDS,
+                )
+            except httpx.TimeoutException as exc:
+                raise HTTPException(
+                    status_code=504,
+                    detail=(
+                        f"环境图生成超时：{group['group_label']} 生成时间过长，请重试。"
+                    ),
+                ) from exc
             variant_results[variant] = {
                 "prompt": prompt_payload["prompt"],
                 "image_url": result["image_url"],

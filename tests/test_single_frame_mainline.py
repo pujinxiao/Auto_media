@@ -3,9 +3,14 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
+_PREVIOUS_CONFIG_MODULE = sys.modules.get("app.core.config")
+_INJECTED_CONFIG_STUB = False
+
 if "app.core.config" not in sys.modules:
     config_stub = types.ModuleType("app.core.config")
     config_stub.settings = types.SimpleNamespace(
+        database_url="sqlite+aiosqlite:///:memory:",
+        debug=False,
         default_llm_provider="claude",
         anthropic_api_key="",
         anthropic_base_url="https://api.anthropic.com",
@@ -28,12 +33,20 @@ if "app.core.config" not in sys.modules:
         validate_base_url_dns=False,
     )
     sys.modules["app.core.config"] = config_stub
+    _INJECTED_CONFIG_STUB = True
 
 from app.core.story_context import build_generation_payload
 from app.schemas.storyboard import CameraSetup, Shot, VisualElements
 from app.services.image import generate_images_batch
 from app.services.storyboard_state import serialize_shot_for_storage
 from app.services.video import generate_videos_batch
+
+
+def tearDownModule():
+    if _INJECTED_CONFIG_STUB:
+        sys.modules.pop("app.core.config", None)
+        if _PREVIOUS_CONFIG_MODULE is not None:
+            sys.modules["app.core.config"] = _PREVIOUS_CONFIG_MODULE
 
 
 class SingleFrameMainlineTests(unittest.IsolatedAsyncioTestCase):

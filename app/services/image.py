@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import ipaddress
 import logging
 import mimetypes
 import re
@@ -15,6 +16,7 @@ from app.core.config import settings
 from app.core.api_keys import mask_key, inject_art_style
 from app.prompts.character import build_character_prompt
 
+MEDIA_DIR = Path("media")
 IMAGE_DIR = Path("media/images")
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -83,6 +85,43 @@ def _data_url_from_bytes(content: bytes, name: str = "", content_type: str = "")
     return f"data:{mime};base64,{encoded}"
 
 
+def _resolve_allowed_media_path(path_like: str | Path) -> Path | None:
+    try:
+        candidate = Path(path_like).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
+        media_root = MEDIA_DIR.resolve()
+        if resolved.is_file() and resolved.is_relative_to(media_root):
+            return resolved
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return None
+
+
+def _safe_media_name(name: str) -> str:
+    candidate = Path(str(name or "")).name
+    if candidate and re.fullmatch(r"[A-Za-z0-9._-]+", candidate):
+        return candidate
+    return "image.png"
+
+
+def _is_private_or_local_host(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    if normalized in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
 async def _resolve_reference_image_value(reference: Any, client: httpx.AsyncClient) -> str:
     if isinstance(reference, str):
         image_url = reference.strip()
@@ -94,40 +133,33 @@ async def _resolve_reference_image_value(reference: Any, client: httpx.AsyncClie
         return ""
 
     if image_path:
-        local_path = Path(image_path)
-        if local_path.exists():
+        local_path = _resolve_allowed_media_path(image_path)
+        if local_path:
             return _data_url_from_bytes(local_path.read_bytes(), name=local_path.name)
 
     if image_url.startswith("data:"):
         return image_url
 
     if image_url.startswith("/"):
-        relative_path = Path(image_url.lstrip("/"))
-        if relative_path.exists():
+        relative_path = _resolve_allowed_media_path(image_url.lstrip("/"))
+        if relative_path:
             return _data_url_from_bytes(relative_path.read_bytes(), name=relative_path.name)
         return ""
 
     parsed = urlparse(image_url)
     if parsed.scheme in ("http", "https"):
         host = parsed.hostname or ""
-        is_local = (
-            host in ("localhost", "127.0.0.1", "0.0.0.0")
-            or host.startswith("192.168.")
-            or host.startswith("10.")
-        )
-        if is_local:
-            resp = await client.get(image_url)
-            resp.raise_for_status()
-            return _data_url_from_bytes(
-                resp.content,
-                name=parsed.path,
-                content_type=resp.headers.get("content-type", ""),
-            )
+        if _is_private_or_local_host(host):
+            if parsed.path.startswith("/media/"):
+                local_path = _resolve_allowed_media_path(parsed.path.lstrip("/"))
+                if local_path:
+                    return _data_url_from_bytes(local_path.read_bytes(), name=_safe_media_name(parsed.path))
+            return ""
         return image_url
 
     if image_url:
-        local_path = Path(image_url)
-        if local_path.exists():
+        local_path = _resolve_allowed_media_path(image_url)
+        if local_path:
             return _data_url_from_bytes(local_path.read_bytes(), name=local_path.name)
 
     return ""
@@ -143,6 +175,7 @@ async def generate_image(
     reference_images: Optional[list[Any]] = None,
     output_dir: Optional[Path] = None,
     url_prefix: str = "/media/images",
+    timeout_seconds: float = 60,
 ) -> dict:
     """Generate image for a single shot. Returns { shot_id, image_path, image_url }."""
     base_url = image_base_url or settings.siliconflow_base_url
@@ -150,7 +183,7 @@ async def generate_image(
         raise HTTPException(status_code=400, detail="提供自定义 image_base_url 时必须同时提供 image_api_key")
     image_api_key = image_api_key or settings.siliconflow_api_key
     size = ARK_IMAGE_SIZE if _is_ark(base_url) else IMAGE_SIZE
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         payload = {"model": model, "prompt": visual_prompt, "n": 1, "size": size, "response_format": "url"}
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from enum import Enum
 
@@ -112,7 +112,7 @@ class TransitionGenerateRequest(BaseModel):
     from_shot_id: str
     to_shot_id: str
     transition_prompt: Optional[str] = None
-    duration_seconds: int = 2
+    duration_seconds: int = Field(default=2, gt=0)
     model: Optional[str] = None
 
 
@@ -128,7 +128,7 @@ class TransitionResult(BaseModel):
     from_shot_id: str
     to_shot_id: str
     prompt: Optional[str] = None
-    duration_seconds: int = 2
+    duration_seconds: int = Field(default=2, gt=0)
     video_url: str
     first_frame_source: TransitionFrameSource
     last_frame_source: TransitionFrameSource

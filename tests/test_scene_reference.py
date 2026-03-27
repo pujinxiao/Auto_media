@@ -3,9 +3,12 @@ from typing import Optional
 from unittest.mock import AsyncMock, patch
 
 from fastapi import Request
+from fastapi import HTTPException
+import httpx
 
 from app.routers.story import SceneReferenceGenerateRequest, generate_scene_reference
 from app.services.scene_reference import (
+    SCENE_REFERENCE_IMAGE_TIMEOUT_SECONDS,
     build_episode_environment_prompts,
     generate_episode_scene_reference,
     group_episode_scenes_by_environment,
@@ -93,6 +96,68 @@ class SceneReferencePromptTests(unittest.TestCase):
 
 
 class SceneReferenceRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_episode_scene_reference_uses_extended_timeout(self):
+        story = {
+            "id": "story-scene-ref-timeout-window",
+            "meta": {},
+            "scenes": [
+                {
+                    "episode": 1,
+                    "title": "第一集",
+                    "scenes": [
+                        {"scene_number": 1, "environment": "庭院", "visual": "雨夜庭院"},
+                    ],
+                }
+            ],
+        }
+
+        with patch(
+            "app.services.scene_reference.generate_image",
+            new=AsyncMock(
+                return_value={
+                    "shot_id": "ep01_env01_scene",
+                    "image_url": "/media/episodes/scene-1.png",
+                    "image_path": "media/episodes/scene-1.png",
+                }
+            ),
+        ) as generate_mock:
+            await generate_episode_scene_reference(
+                story,
+                story_context=None,
+                episode=1,
+            )
+
+        self.assertEqual(generate_mock.await_args.kwargs["timeout_seconds"], SCENE_REFERENCE_IMAGE_TIMEOUT_SECONDS)
+
+    async def test_generate_episode_scene_reference_converts_timeout_to_gateway_timeout(self):
+        story = {
+            "id": "story-scene-ref-timeout",
+            "meta": {},
+            "scenes": [
+                {
+                    "episode": 1,
+                    "title": "第一集",
+                    "scenes": [
+                        {"scene_number": 1, "environment": "庭院", "visual": "雨夜庭院"},
+                    ],
+                }
+            ],
+        }
+
+        with patch(
+            "app.services.scene_reference.generate_image",
+            new=AsyncMock(side_effect=httpx.ReadTimeout("timed out")),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await generate_episode_scene_reference(
+                    story,
+                    story_context=None,
+                    episode=1,
+                )
+
+        self.assertEqual(ctx.exception.status_code, 504)
+        self.assertIn("环境图生成超时", ctx.exception.detail)
+
     async def test_generate_episode_scene_reference_reuses_existing_asset_for_minor_scene_tweaks(self):
         story = {
             "id": "story-scene-ref-reuse",

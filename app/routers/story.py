@@ -271,15 +271,17 @@ async def generate_scene_reference(
     art_style = get_art_style(request)
     existing_episode_assets = dict((story.get("meta") or {}).get("episode_reference_assets") or {})
     episode_prefix = f"ep{body.episode:02d}_"
-    existing_groups = [
-        {
-            "environment_pack_key": pack_key,
-            "affected_scene_keys": list(asset.get("affected_scene_keys") or []),
-            "asset": asset,
-        }
-        for pack_key, asset in sorted(existing_episode_assets.items())
-        if pack_key.startswith(episode_prefix) and asset.get("status") == "ready"
-    ]
+    existing_groups = []
+    if not body.force_regenerate:
+        existing_groups = [
+            {
+                "environment_pack_key": pack_key,
+                "affected_scene_keys": list(asset.get("affected_scene_keys") or []),
+                "asset": asset,
+            }
+            for pack_key, asset in sorted(existing_episode_assets.items())
+            if pack_key.startswith(episode_prefix) and asset.get("status") == "ready"
+        ]
 
     try:
         result = await generate_episode_scene_reference(

@@ -330,6 +330,18 @@ export const useStoryStore = defineStore('story', {
       })
       return groups.sort((left, right) => (left.group_index || 0) - (right.group_index || 0))
     },
+    getEpisodeSceneReferenceStatus(episode) {
+      const groups = this.getEpisodeSceneReferenceGroups(episode)
+      if (groups.some(group => group.status === 'loading')) return 'loading'
+      if (groups.some(group => group.status === 'failed')) return 'failed'
+      if (groups.some(group => group.status === 'stale')) return 'stale'
+      if (groups.some(group => group.status === 'idle')) return 'idle'
+      if (groups.length > 0 && groups.every(group => group.status === 'ready')) return 'ready'
+
+      const fallbackSceneNumber = this.scenes.find(item => item.episode === episode)?.scenes?.[0]?.scene_number || 1
+      const fallbackSceneKey = getSceneKey(episode, fallbackSceneNumber)
+      return this.sceneReferenceAssets[fallbackSceneKey]?.status || 'idle'
+    },
     setSceneReferenceAsset(sceneKey, asset = {}) {
       const existing = this.sceneReferenceAssets[sceneKey] || createEmptySceneReferenceAsset()
       this.sceneReferenceAssets = {
@@ -465,33 +477,42 @@ export const useStoryStore = defineStore('story', {
       if (has('finalVideoUrl')) {
         nextGeneration.final_video_url = typeof payload.finalVideoUrl === 'string' ? payload.finalVideoUrl : ''
       }
-      if (has('generatedFiles')) {
-        const existingGeneratedFiles = nextGeneration.generated_files && typeof nextGeneration.generated_files === 'object'
-          ? nextGeneration.generated_files
-          : {}
+      if (has('clearGeneratedFiles') && payload.clearGeneratedFiles) {
+        // Parsing/reset flows should drop stale timeline/video artifacts entirely.
+        nextGeneration.generated_files = {}
+      } else if (has('generatedFiles')) {
         const incomingGeneratedFiles = payload.generatedFiles && typeof payload.generatedFiles === 'object'
           ? payload.generatedFiles
           : {}
-        const mergedGeneratedFiles = { ...existingGeneratedFiles }
-        Object.entries(incomingGeneratedFiles).forEach(([key, value]) => {
-          if (
-            mergedGeneratedFiles[key]
-            && typeof mergedGeneratedFiles[key] === 'object'
-            && !Array.isArray(mergedGeneratedFiles[key])
-            && value
-            && typeof value === 'object'
-            && !Array.isArray(value)
-          ) {
-            mergedGeneratedFiles[key] = {
-              ...mergedGeneratedFiles[key],
-              ...value,
-            }
-            return
+        if (has('replaceGeneratedFiles') && payload.replaceGeneratedFiles) {
+          nextGeneration.generated_files = {
+            ...incomingGeneratedFiles,
           }
-          mergedGeneratedFiles[key] = value
-        })
-        nextGeneration.generated_files = {
-          ...mergedGeneratedFiles,
+        } else {
+          const existingGeneratedFiles = nextGeneration.generated_files && typeof nextGeneration.generated_files === 'object'
+            ? nextGeneration.generated_files
+            : {}
+          const mergedGeneratedFiles = { ...existingGeneratedFiles }
+          Object.entries(incomingGeneratedFiles).forEach(([key, value]) => {
+            if (
+              mergedGeneratedFiles[key]
+              && typeof mergedGeneratedFiles[key] === 'object'
+              && !Array.isArray(mergedGeneratedFiles[key])
+              && value
+              && typeof value === 'object'
+              && !Array.isArray(value)
+            ) {
+              mergedGeneratedFiles[key] = {
+                ...mergedGeneratedFiles[key],
+                ...value,
+              }
+              return
+            }
+            mergedGeneratedFiles[key] = value
+          })
+          nextGeneration.generated_files = {
+            ...mergedGeneratedFiles,
+          }
         }
       }
 
@@ -520,6 +541,7 @@ export const useStoryStore = defineStore('story', {
       this.syncStoryboardGenerationMeta({
         shots: [],
         finalVideoUrl: '',
+        clearGeneratedFiles: true,
       })
     },
     updateOutlineEpisode(episode, title, summary) {

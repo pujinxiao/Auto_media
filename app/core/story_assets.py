@@ -28,6 +28,16 @@ def extract_scene_number_from_source_scene_key(source_scene_key: str) -> int | N
     return None
 
 
+def extract_episode_number_from_source_scene_key(source_scene_key: str) -> int | None:
+    normalized = _normalize_text(source_scene_key)
+    if not normalized:
+        return None
+    match = re.search(r"ep(\d+)", normalized, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _is_usable_scene_reference_asset(asset: Mapping[str, Any]) -> bool:
     status = _normalize_text(asset.get("status", ""))
     if status and status != "ready":
@@ -153,14 +163,25 @@ def get_scene_reference_asset(
     if scene_number is None:
         return {}
 
-    suffix = f"_scene{scene_number:02d}"
-    matches = [
-        dict(asset)
-        for key, asset in assets.items()
-        if isinstance(asset, Mapping)
-        and _normalize_text(key).lower().endswith(suffix.lower())
-        and _is_usable_scene_reference_asset(asset)
-    ]
+    def _collect_matches(suffix: str) -> list[dict[str, Any]]:
+        return [
+            dict(asset)
+            for key, asset in assets.items()
+            if isinstance(asset, Mapping)
+            and _normalize_text(key).lower().endswith(suffix.lower())
+            and _is_usable_scene_reference_asset(asset)
+        ]
+
+    episode_number = extract_episode_number_from_source_scene_key(normalized_key)
+    if episode_number is not None:
+        episode_suffix = f"ep{episode_number:02d}_scene{scene_number:02d}"
+        matches = _collect_matches(episode_suffix)
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return {}
+
+    matches = _collect_matches(f"_scene{scene_number:02d}")
     if len(matches) == 1:
         return matches[0]
     return {}

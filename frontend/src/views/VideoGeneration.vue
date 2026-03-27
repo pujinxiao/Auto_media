@@ -617,6 +617,7 @@ function updateShotsFromGeneratedFiles(generatedFiles = {}, { replaceStoryboard 
 
   storyStore.syncStoryboardGenerationMeta({
     generatedFiles,
+    replaceGeneratedFiles: replaceStoryboard,
   })
   storyStore.syncStoryboardGenerationMeta({
     shots: shots.value,
@@ -650,7 +651,7 @@ async function pollManualPipeline({ projectId, pipelineId, storyId, isDone, time
       pipelineId: state.pipeline_id || pipelineId,
       storyId: state.story_id || storyId,
     })
-    updateShotsFromGeneratedFiles(state.generated_files)
+    updateShotsFromGeneratedFiles(state.generated_files, { replaceStoryboard: true })
 
     if (state.status === 'failed') {
       throw new Error(state.error || '批量任务失败')
@@ -696,11 +697,7 @@ const hasStoryData = computed(() => {
   return storyStore.scenes && storyStore.scenes.length > 0
 })
 const readyEpisodeReferenceCount = computed(() =>
-  storyStore.scenes.filter(episode =>
-    (episode.scenes || []).some(scene =>
-      storyStore.sceneReferenceAssets?.[storyStore.getSceneKey(episode.episode, scene.scene_number)]?.status === 'ready'
-    )
-  ).length
+  storyStore.scenes.filter(episode => storyStore.getEpisodeSceneReferenceStatus(episode.episode) === 'ready').length
 )
 
 const hasManualScript = computed(() => {
@@ -741,11 +738,7 @@ function getEpisodeReferenceGroups(episode) {
 }
 
 function getEpisodeReferenceStatus(episode) {
-  const groups = getEpisodeReferenceGroups(episode)
-  if (groups.some(group => group.status === 'loading')) return 'loading'
-  if (groups.some(group => group.status === 'failed')) return 'failed'
-  if (groups.length > 0 && groups.every(group => group.status === 'ready')) return 'ready'
-  return getSceneReferenceAsset(episode, getEpisodeReferenceSceneNumber(episode)).status || 'idle'
+  return storyStore.getEpisodeSceneReferenceStatus(episode)
 }
 
 function getEpisodeReferenceError(episode) {
@@ -1211,7 +1204,7 @@ async function generateTransitionForSlot(item) {
       pipelineId: state.pipeline_id || pipelineId,
       storyId: state.story_id || effectiveStoryId(),
     })
-    updateShotsFromGeneratedFiles(state.generated_files)
+    updateShotsFromGeneratedFiles(state.generated_files, { replaceStoryboard: true })
     transitionMessage.value = `过渡视频已生成：${result.from_shot_id} -> ${result.to_shot_id}`
   } catch (err) {
     console.error('Transition generation failed:', err)
@@ -1310,7 +1303,7 @@ async function generateAllTTS() {
       pipelineId: data.pipeline_id || manualPipelineId.value,
       storyId: data.story_id || fallbackStoryId,
     })
-    updateShotsFromGeneratedFiles(data.state?.generated_files)
+    updateShotsFromGeneratedFiles(data.state?.generated_files, { replaceStoryboard: true })
 
     await pollManualPipeline({
       projectId,
@@ -1416,7 +1409,7 @@ async function generateAllImages() {
       pipelineId: data.pipeline_id || manualPipelineId.value,
       storyId: data.story_id || fallbackStoryId,
     })
-    updateShotsFromGeneratedFiles(data.state?.generated_files)
+    updateShotsFromGeneratedFiles(data.state?.generated_files, { replaceStoryboard: true })
 
     await pollManualPipeline({
       projectId,
@@ -1518,7 +1511,7 @@ async function generateAllVideos() {
       pipelineId: data.pipeline_id || manualPipelineId.value,
       storyId: data.story_id || fallbackStoryId,
     })
-    updateShotsFromGeneratedFiles(data.state?.generated_files)
+    updateShotsFromGeneratedFiles(data.state?.generated_files, { replaceStoryboard: true })
 
     await pollManualPipeline({
       projectId,

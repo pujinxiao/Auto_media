@@ -4,7 +4,12 @@ from unittest.mock import patch
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import Base
-from app.core.story_assets import build_character_asset_record, get_character_design_prompt, get_character_visual_dna
+from app.core.story_assets import (
+    build_character_asset_record,
+    get_character_design_prompt,
+    get_character_visual_dna,
+    get_scene_reference_asset,
+)
 from app.core.story_context import _GENRE_STYLE_RULES, build_generation_payload, build_story_context, character_appears_in_shot, infer_shot_view_hint
 from app.models.story import Story
 from app.schemas.storyboard import AudioReference, CameraSetup, Shot, VisualElements
@@ -85,6 +90,77 @@ class StoryContextTests(unittest.TestCase):
         self.assertEqual(len(payload["reference_images"]), 2)
         self.assertEqual(payload["reference_images"][0]["kind"], "character")
         self.assertEqual(payload["reference_images"][1]["kind"], "scene")
+
+    def test_get_scene_reference_asset_fallback_respects_episode_token(self):
+        story = {
+            "meta": {
+                "scene_reference_assets": {
+                    "ep01_scene01": {
+                        "status": "ready",
+                        "variants": {"scene": {"image_url": "/media/episodes/ep01_scene01.png"}},
+                    },
+                    "ep02_scene01": {
+                        "status": "ready",
+                        "variants": {"scene": {"image_url": "/media/episodes/ep02_scene01.png"}},
+                    },
+                }
+            }
+        }
+
+        asset = get_scene_reference_asset(
+            story,
+            "ep02_scene01_variant",
+            shot_id="scene1_shot1",
+        )
+
+        self.assertEqual(asset["variants"]["scene"]["image_url"], "/media/episodes/ep02_scene01.png")
+
+    def test_build_generation_payload_preserves_explicit_reference_images(self):
+        story = {
+            "characters": [
+                {
+                    "id": "char_li_ming",
+                    "name": "Li Ming",
+                    "description": "young man, short black hair, wearing a dark blue robe.",
+                }
+            ],
+            "character_images": {
+                "char_li_ming": {
+                    "image_url": "/media/characters/li_ming.png",
+                    "image_path": "media/characters/li_ming.png",
+                }
+            },
+            "meta": {
+                "scene_reference_assets": {
+                    "ep01_scene01": {
+                        "status": "ready",
+                        "variants": {
+                            "scene": {
+                                "image_url": "/media/episodes/ep01_env01_scene.png",
+                                "image_path": "media/episodes/ep01_env01_scene.png",
+                            }
+                        },
+                    }
+                }
+            },
+        }
+        shot = {
+            "shot_id": "scene1_shot1",
+            "source_scene_key": "ep01_scene01",
+            "image_prompt": "Medium shot. Li Ming pauses at the teahouse doorway.",
+            "final_video_prompt": "Medium shot. Static camera. Li Ming pushes the door inward.",
+            "reference_images": [
+                {"kind": "custom", "image_url": "/media/images/custom.png"},
+                {"kind": "scene", "image_url": "/media/episodes/ep01_env01_scene.png"},
+            ],
+        }
+
+        payload = build_generation_payload(shot, build_story_context(story), story=story)
+
+        self.assertEqual(len(payload["reference_images"]), 3)
+        self.assertEqual(payload["reference_images"][0]["kind"], "custom")
+        self.assertEqual(payload["reference_images"][1]["kind"], "scene")
+        self.assertEqual(payload["reference_images"][2]["kind"], "character")
 
     def test_build_story_context_and_payload_preserve_split_prompts(self):
         story = {

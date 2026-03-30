@@ -357,7 +357,6 @@ h1 {
   color: #fff;
   box-shadow: 0 6px 14px rgba(108, 99, 255, 0.16);
 }
-
 .episode-key-art-group {
   border-radius: 10px;
   border: 1px solid #ddd7ff;
@@ -789,6 +788,7 @@ button {
   transition: background 0.2s;
 }
 
+<<<<<<< HEAD
 button:hover:where(:not(:disabled)) {
   background: #5a52e0;
 }
@@ -876,7 +876,6 @@ button:disabled {
   font-size: 12px;
   line-height: 1.6;
 }
-
 .action-group {
   display: flex;
   gap: 8px;
@@ -990,6 +989,7 @@ button:disabled {
   text-align: right;
   overflow-wrap: break-word;
   word-wrap: break-word;
+  word-break: break-word;
 }
 
 .transition-title {

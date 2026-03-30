@@ -16,6 +16,7 @@ from app.core.pipeline_runtime import (
 from app.main import app
 from app.routers.image import generate_images as generate_single_images, ImageRequest
 from app.routers.pipeline import (
+    _resolve_public_base_url,
     _persist_manual_pipeline_state,
     _trim_words,
     concat_videos,
@@ -33,6 +34,18 @@ from app.services import story_repository as repo
 
 
 class PipelineRuntimeHelperTests(unittest.TestCase):
+    def _make_request(self, host: str = "testserver") -> Request:
+        return Request(
+            {
+                "type": "http",
+                "headers": [],
+                "scheme": "http",
+                "server": (host, 80),
+                "root_path": "",
+                "path": "/",
+            }
+        )
+
     def test_executor_generation_payload_includes_scene_reference_assets(self):
         executor = PipelineExecutor("project-1", "pipeline-1", None)
         executor.art_style = "cinematic watercolor"
@@ -160,6 +173,25 @@ class PipelineRuntimeHelperTests(unittest.TestCase):
         self.assertEqual(metadata["runtime_strategy"], INTEGRATED_FALLBACK_RUNTIME)
         self.assertEqual(metadata["note"], INTEGRATED_FALLBACK_NOTE)
         self.assertFalse(metadata["audio_integrated"])
+
+    def test_resolve_public_base_url_rejects_loopback_fallback_when_not_configured(self):
+        request = self._make_request("127.0.0.1")
+
+        with patch("app.routers.pipeline.logger.warning") as warning_mock:
+            with self.assertRaises(HTTPException) as ctx:
+                _resolve_public_base_url(request, "")
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("base_url", ctx.exception.detail)
+        warning_mock.assert_called_once()
+
+    def test_resolve_public_base_url_allows_non_loopback_request_fallback(self):
+        request = self._make_request("media.example.com")
+
+        self.assertEqual(
+            _resolve_public_base_url(request, ""),
+            "http://media.example.com",
+        )
 
     def test_app_no_longer_mounts_legacy_projects_router(self):
         paths = {route.path for route in app.router.routes}

@@ -1,5 +1,6 @@
 import logging
 import re
+from ipaddress import ip_address
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -389,7 +390,29 @@ def _resolve_public_base_url(request: Request, configured_base_url: str = "") ->
     normalized = str(configured_base_url or "").strip().rstrip("/")
     if normalized:
         return normalized
-    return str(request.base_url).rstrip("/")
+
+    fallback_base_url = str(request.base_url).rstrip("/")
+    hostname = (urlsplit(fallback_base_url).hostname or "").strip().lower()
+    is_loopback_fallback = hostname in {"localhost"} or hostname.endswith(".localhost")
+    if not is_loopback_fallback and hostname:
+        try:
+            parsed_ip = ip_address(hostname)
+        except ValueError:
+            parsed_ip = None
+        is_loopback_fallback = bool(parsed_ip and (parsed_ip.is_loopback or parsed_ip.is_unspecified))
+
+    if is_loopback_fallback:
+        logger.warning(
+            "Configured public base_url is empty and request.base_url points to a local-only address; refusing fallback. configured_base_url=%r request.base_url=%s",
+            configured_base_url,
+            request.base_url,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="当前未提供可公网访问的 base_url，且请求地址是 localhost/127.0.0.1。请显式传入可访问的 base_url 后再继续。",
+        )
+
+    return fallback_base_url
 
 
 def _absolute_media_url(url: str, base_url: str) -> str:

@@ -272,6 +272,118 @@ class StoryboardStateTests(unittest.TestCase):
         self.assertEqual(state["generated_files"]["timeline"], [{"item_type": "shot", "item_id": "shot-1"}, {"item_type": "shot", "item_id": "shot-2"}])
         self.assertEqual(state["final_video_url"], "")
 
+    def test_invalidation_without_authoritative_shots_does_not_prune_unrelated_assets(self):
+        story = {
+            "meta": {
+                "storyboard_generation": {
+                    "shots": [],
+                    "generated_files": {
+                        "images": {
+                            "shot-1": {"shot_id": "shot-1", "image_url": "/media/images/shot-1.png"},
+                            "shot-2": {"shot_id": "shot-2", "image_url": "/media/images/shot-2.png"},
+                        },
+                        "videos": {
+                            "shot-1": {"shot_id": "shot-1", "video_url": "/media/videos/shot-1.mp4"},
+                            "shot-2": {"shot_id": "shot-2", "video_url": "/media/videos/shot-2.mp4"},
+                        },
+                        "transitions": {
+                            "transition_shot-1__shot-2": {
+                                "transition_id": "transition_shot-1__shot-2",
+                                "from_shot_id": "shot-1",
+                                "to_shot_id": "shot-2",
+                                "video_url": "/media/videos/transition-shot-1__shot-2.mp4",
+                            }
+                        },
+                        "timeline": [
+                            {"item_type": "shot", "item_id": "shot-1"},
+                            {"item_type": "transition", "item_id": "transition_shot-1__shot-2"},
+                            {"item_type": "shot", "item_id": "shot-2"},
+                        ],
+                        "final_video_url": "/media/videos/final-old.mp4",
+                    },
+                    "final_video_url": "/media/videos/final-old.mp4",
+                }
+            }
+        }
+
+        state = build_storyboard_generation_state(
+            story,
+            invalidate_shot_ids=["shot-1"],
+            clear_videos_for_invalidated_shots=True,
+            clear_final_video=True,
+        )
+
+        self.assertEqual(
+            state["generated_files"]["images"],
+            {
+                "shot-1": {"shot_id": "shot-1", "image_url": "/media/images/shot-1.png"},
+                "shot-2": {"shot_id": "shot-2", "image_url": "/media/images/shot-2.png"},
+            },
+        )
+        self.assertEqual(
+            state["generated_files"]["videos"],
+            {"shot-2": {"shot_id": "shot-2", "video_url": "/media/videos/shot-2.mp4"}},
+        )
+        self.assertEqual(state["generated_files"]["transitions"], {})
+        self.assertEqual(
+            state["generated_files"]["timeline"],
+            [
+                {"item_type": "shot", "item_id": "shot-1"},
+                {"item_type": "shot", "item_id": "shot-2"},
+            ],
+        )
+        self.assertEqual(state["final_video_url"], "")
+
+    def test_replace_generated_files_clears_missing_media_fields_from_existing_shots(self):
+        story = {
+            "meta": {
+                "storyboard_generation": {
+                    "shots": [
+                        {
+                            "shot_id": "shot-1",
+                            "audio_url": "/media/audio/shot-1.mp3",
+                            "audio_duration": 1.8,
+                            "image_url": "/media/images/shot-1.png",
+                            "video_url": "/media/videos/shot-1.mp4",
+                        }
+                    ],
+                    "generated_files": {
+                        "tts": {
+                            "shot-1": {
+                                "shot_id": "shot-1",
+                                "audio_url": "/media/audio/shot-1.mp3",
+                                "duration_seconds": 1.8,
+                            }
+                        },
+                        "images": {
+                            "shot-1": {"shot_id": "shot-1", "image_url": "/media/images/shot-1.png"},
+                        },
+                        "videos": {
+                            "shot-1": {"shot_id": "shot-1", "video_url": "/media/videos/shot-1.mp4"},
+                        },
+                    },
+                }
+            }
+        }
+
+        state = build_storyboard_generation_state(
+            story,
+            generated_files={
+                "storyboard": {
+                    "shots": [
+                        {"shot_id": "shot-1", "storyboard_description": "refreshed shot"},
+                    ]
+                }
+            },
+            replace_generated_files=True,
+        )
+
+        self.assertEqual(list(state["generated_files"].keys()), ["storyboard"])
+        self.assertNotIn("audio_url", state["shots"][0])
+        self.assertNotIn("audio_duration", state["shots"][0])
+        self.assertNotIn("image_url", state["shots"][0])
+        self.assertNotIn("video_url", state["shots"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -172,6 +172,32 @@ def prune_generated_files_to_storyboard(
     return pruned
 
 
+def _has_authoritative_storyboard_shots(shots: list[Any] | None) -> bool:
+    return bool(collect_storyboard_shot_ids(shots))
+
+
+def _filter_existing_timeline(
+    timeline: Any,
+    *,
+    valid_transition_ids: set[str] | None = None,
+) -> list[dict[str, str]]:
+    if not isinstance(timeline, list):
+        return []
+
+    filtered: list[dict[str, str]] = []
+    for item in timeline:
+        if not isinstance(item, Mapping):
+            continue
+        item_type = str(item.get("item_type", "")).strip()
+        item_id = str(item.get("item_id", "")).strip()
+        if not item_type or not item_id:
+            continue
+        if item_type == "transition" and valid_transition_ids is not None and item_id not in valid_transition_ids:
+            continue
+        filtered.append({"item_type": item_type, "item_id": item_id})
+    return filtered
+
+
 def invalidate_generated_files_for_shots(
     generated_files: Mapping[str, Any] | None,
     shots: list[Any] | None,
@@ -185,7 +211,11 @@ def invalidate_generated_files_for_shots(
         for shot_id in invalidated_shot_ids or []
         if str(shot_id).strip()
     }
-    next_generated_files = prune_generated_files_to_storyboard(generated_files, shots)
+    has_authoritative_shots = _has_authoritative_storyboard_shots(shots)
+    if has_authoritative_shots:
+        next_generated_files = prune_generated_files_to_storyboard(generated_files, shots)
+    else:
+        next_generated_files = deepcopy(dict(generated_files)) if isinstance(generated_files, Mapping) else {}
 
     if clear_videos_for_invalidated_shots and "videos" in next_generated_files:
         next_generated_files["videos"] = {
@@ -205,10 +235,15 @@ def invalidate_generated_files_for_shots(
             )
         }
 
-    if "timeline" in next_generated_files or "transitions" in next_generated_files:
+    if has_authoritative_shots and ("timeline" in next_generated_files or "transitions" in next_generated_files):
         next_generated_files["timeline"] = build_storyboard_timeline(
             shots,
             next_generated_files.get("transitions"),
+        )
+    elif "timeline" in next_generated_files:
+        next_generated_files["timeline"] = _filter_existing_timeline(
+            next_generated_files.get("timeline"),
+            valid_transition_ids=set(dict(next_generated_files.get("transitions") or {}).keys()),
         )
 
     if clear_final_video:
@@ -263,6 +298,8 @@ def _merge_shots(
 def _apply_generated_files_to_shots(
     shots: list[dict[str, Any]],
     generated_files: Mapping[str, Any] | None,
+    *,
+    clear_missing_sections: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(generated_files, Mapping):
         return shots
@@ -282,9 +319,10 @@ def _apply_generated_files_to_shots(
     image_entries = dict(generated_files.get("images") or {}) if isinstance(generated_files.get("images"), Mapping) else {}
     video_entries = dict(generated_files.get("videos") or {}) if isinstance(generated_files.get("videos"), Mapping) else {}
 
-    has_tts_entries = "tts" in generated_files
-    has_image_entries = "images" in generated_files
-    has_video_entries = "videos" in generated_files
+    clear_missing_sections = set(clear_missing_sections or set())
+    has_tts_entries = "tts" in generated_files or "tts" in clear_missing_sections
+    has_image_entries = "images" in generated_files or "images" in clear_missing_sections
+    has_video_entries = "videos" in generated_files or "videos" in clear_missing_sections
 
     for shot_id, shot in shot_map.items():
         if has_tts_entries and shot_id not in tts_entries:
@@ -370,10 +408,12 @@ def build_storyboard_generation_state(
         state["usage"] = deepcopy(dict(usage))
     next_generated_files = state.get("generated_files")
     should_refresh_shots_from_generated_files = False
+    clear_missing_sections: set[str] = set()
 
     if generated_files is not None:
         if replace_generated_files:
             next_generated_files = deepcopy(dict(generated_files)) if isinstance(generated_files, Mapping) else {}
+            clear_missing_sections = {"tts", "images", "videos"}
         else:
             next_generated_files = _merge_generated_files(
                 next_generated_files,
@@ -383,7 +423,11 @@ def build_storyboard_generation_state(
     elif isinstance(next_generated_files, Mapping):
         next_generated_files = deepcopy(dict(next_generated_files))
 
-    if prune_generated_files_to_shots and isinstance(next_generated_files, Mapping):
+    if (
+        prune_generated_files_to_shots
+        and isinstance(next_generated_files, Mapping)
+        and _has_authoritative_storyboard_shots(list(state.get("shots") or []))
+    ):
         next_generated_files = prune_generated_files_to_storyboard(
             next_generated_files,
             list(state.get("shots") or []),
@@ -410,6 +454,7 @@ def build_storyboard_generation_state(
         state["shots"] = _apply_generated_files_to_shots(
             list(state.get("shots") or []),
             next_generated_files,
+            clear_missing_sections=clear_missing_sections,
         )
     if project_id:
         state["project_id"] = project_id

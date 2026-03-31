@@ -78,6 +78,16 @@ def _coerce_world_building_options(raw_options: Any) -> list[str]:
     return normalized
 
 
+def _format_outline_guidance_list(raw_items: Any, *, fallback: str) -> str:
+    if not isinstance(raw_items, list):
+        return fallback
+
+    normalized_items = [str(item).strip() for item in raw_items if str(item or "").strip()]
+    if not normalized_items:
+        return fallback
+    return "\n".join(f"- {item}" for item in normalized_items)
+
+
 def _fallback_world_building_options(question: dict) -> list[str]:
     question_text = str(question.get("text") or "").strip()
     question_dimension = str(question.get("dimension") or "").strip()
@@ -435,6 +445,14 @@ async def generate_script(story_id: str, db: AsyncSession, api_key: str = "", ba
             title=ep["title"],
             summary=ep["summary"],
             characters_text=characters_text,
+            beats_text=_format_outline_guidance_list(
+                ep.get("beats"),
+                fallback="- 未提供额外节拍，请根据剧情概要自行拆出本集冲突递进。",
+            ),
+            scene_list_text=_format_outline_guidance_list(
+                ep.get("scene_list"),
+                fallback="- 未提供额外场景切分，请根据剧情概要自行划分 3-5 个稳定场景。",
+            ),
         )
         resolved_model = _get_model(provider, model)
         try:

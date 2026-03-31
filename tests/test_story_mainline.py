@@ -202,8 +202,14 @@ class StoryMainlineFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("# 角色信息", finalized["script"])
         self.assertIn("Visual DNA:", finalized["script"])
+        self.assertIn("【场景标题】", finalized["script"])
+        self.assertIn("【环境锚点】", finalized["script"])
         self.assertIn("【环境】", finalized["script"])
+        self.assertIn("【光线】", finalized["script"])
+        self.assertIn("【情感标尺】", finalized["script"])
+        self.assertIn("【关键道具】", finalized["script"])
         self.assertIn("【画面】", finalized["script"])
+        self.assertIn("【动作拆解】", finalized["script"])
         self.assertIn("【", finalized["script"])
         self.assertEqual(finalized["story_id"], story_id)
 

@@ -307,6 +307,9 @@
               </div>
               <div v-if="hasSpeechAudio(item.shot)" class="shot-field">
                 <label>台词 / 旁白</label>
+                <div v-if="formatAudioSpeaker(item.shot)" class="shot-audio-meta">
+                  <span class="tag type">{{ formatAudioSpeaker(item.shot) }}</span>
+                </div>
                 <p>{{ item.shot.audio_reference?.content || item.shot.dialogue }}</p>
               </div>
               <div class="shot-field">
@@ -390,9 +393,9 @@
               ></video>
               <p class="transition-copy">
                 {{ item.result?.video_url
-                  ? '过渡视频已生成。当前会严格使用前镜最后一帧和后镜第一帧，避免主题漂移。'
+                  ? '过渡视频已生成。当前会严格使用前镜最后一帧和后镜第一帧，并要求过渡平滑、人物环境稳定、镜头衔接自然。'
                   : item.ready
-                    ? '前后镜头视频已就绪，可以生成过渡片段。后端会只读取这两个相邻视频的对应帧。'
+                    ? '前后镜头视频已就绪，可以生成过渡片段。后端会只读取这两个相邻视频的对应帧，并强调平滑自然的人物、环境与镜头连续性。'
                     : '等待前后镜头视频都准备好后，再进入可生成状态。'
                 }}
               </p>
@@ -411,7 +414,7 @@
                   {{ item.loading ? '生成中...' : (item.result?.video_url ? '重新生成过渡视频' : (item.ready ? '生成过渡视频' : '过渡视频待就绪')) }}
                 </button>
                 <span class="transition-hint">
-                  {{ item.result?.video_url ? '已接入后端，可重新生成覆盖当前结果' : (item.ready ? '将从两侧视频中抽取对应帧' : '先补齐两侧视频') }}
+                  {{ item.result?.video_url ? '已接入后端，可重新生成覆盖当前结果' : (item.ready ? '将从两侧视频中抽取对应帧，并约束过渡平滑自然' : '先补齐两侧视频') }}
                 </span>
               </div>
             </div>
@@ -434,7 +437,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettingsStore } from '../stores/settings.js'
 import { useStoryStore } from '../stores/story.js'
-import { generateEpisodeSceneReference, generatePipelineTransition, getHeaders, getPipelineStatus } from '../api/story.js'
+import { buildStoryboardScript, generateEpisodeSceneReference, generatePipelineTransition, getHeaders, getPipelineStatus } from '../api/story.js'
 import StepIndicator from '../components/StepIndicator.vue'
 import ApiKeyModal from '../components/ApiKeyModal.vue'
 import { resolveBackendBaseUrl, resolveBackendMediaUrl } from '../utils/backend.js'
@@ -1056,14 +1059,14 @@ function processFile(file) {
 }
 
 // 获取要解析的剧本
-function getScript() {
+async function getScript() {
   if (manualOverride.value) {
     if (pastedScript.value) return pastedScript.value.trim()
     if (uploadedScript.value) return uploadedScript.value.trim()
     return ''
   }
   if (hasStoryData.value) {
-    return generateScriptFromSelection()
+    return await generateScriptFromSelection()
   } else if (pastedScript.value) {
     return pastedScript.value.trim()
   } else if (uploadedScript.value) {
@@ -1073,33 +1076,12 @@ function getScript() {
 }
 
 // 从选中的场景生成剧本文本
-function generateScriptFromSelection() {
-  const parts = []
+async function generateScriptFromSelection() {
+  const storyId = effectiveStoryId()
+  if (!storyId) return ''
 
-  storyStore.scenes.forEach(episode => {
-    const selectedInEpisode = episode.scenes.filter(scene =>
-      selectedScenes.value[episode.episode]?.[scene.scene_number]
-    )
-
-    if (selectedInEpisode.length > 0) {
-      parts.push(`第 ${episode.episode} 集：${episode.title}\n`)
-
-      selectedInEpisode.forEach(scene => {
-        parts.push(`\n【场景 ${scene.scene_number}】`)
-        parts.push(`环境：${scene.environment}`)
-        parts.push(`画面：${scene.visual}`)
-
-        if (scene.audio && scene.audio.length > 0) {
-          scene.audio.forEach(a => {
-            parts.push(`${a.character}：${a.line}`)
-          })
-        }
-        parts.push('')
-      })
-    }
-  })
-
-  return parts.join('\n')
+  const data = await buildStoryboardScript(storyId, selectedScenes.value)
+  return String(data?.script || '').trim()
 }
 
 function isAuthError(msg) {
@@ -1125,32 +1107,33 @@ async function readApiError(response, fallbackMessage = '请求失败') {
 
 // 解析分镜
 async function parseStoryboard() {
-  const script = getScript()
+  try {
+    const script = await getScript()
 
-  if (!script) {
-    error.value = '请先选择场景或输入剧本内容'
-    return
-  }
+    if (!script) {
+      error.value = '请先选择场景或输入剧本内容'
+      return
+    }
 
-  isParsing.value = true
-  error.value = ''
-  transitionMessage.value = ''
-  episodeReferenceErrors.value = {}
-  storyStore.clearShots()
-  concatVideoUrl.value = ''
-  progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
+    isParsing.value = true
+    error.value = ''
+    transitionMessage.value = ''
+    episodeReferenceErrors.value = {}
+    storyStore.clearShots()
+    concatVideoUrl.value = ''
+    progress.value = { show: true, label: '正在调用 LLM 解析分镜...', percent: 20 }
 
-  parseAbortController?.abort()
-  parseAbortController = new AbortController()
-  const { signal } = parseAbortController
+    parseAbortController?.abort()
+    parseAbortController = new AbortController()
+    const { signal } = parseAbortController
 
-  // Mock 模式
-  if (settings.useMock) {
-    progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
+    // Mock 模式
+    if (settings.useMock) {
+      progress.value = { show: true, label: 'Mock 模式：生成模拟分镜...', percent: 50 }
 
-    await new Promise(resolve => setTimeout(resolve, 800))
+      await new Promise(resolve => setTimeout(resolve, 800))
 
-    const mockShots = [
+      const mockShots = [
       {
         shot_id: 'scene1_shot1',
         storyboard_description: '清晨的森林，阳光透过树叶洒下斑驳光影，一只小鹿在溪边饮水',
@@ -1213,18 +1196,16 @@ async function parseStoryboard() {
       }
     ]
 
-    progress.value = { show: true, label: '解析完成', percent: 100 }
-    storyStore.setShots(mockShots)
+      progress.value = { show: true, label: '解析完成', percent: 100 }
+      storyStore.setShots(mockShots)
 
-    setTimeout(() => {
-      if (isMounted.value) progress.value.show = false
-    }, 500)
+      setTimeout(() => {
+        if (isMounted.value) progress.value.show = false
+      }, 500)
 
-    isParsing.value = false
-    return
-  }
+      return
+    }
 
-  try {
     const projectId = resolveManualProjectId()
 
     progress.value = { show: true, label: 'LLM 处理中，请稍候...', percent: 60 }
@@ -1321,6 +1302,14 @@ async function loadVoices() {
 
 function hasSpeechAudio(shot) {
   return !!(shot && (shot.audio_reference?.content || shot.dialogue) && shot.audio_reference?.type !== 'sfx')
+}
+
+function formatAudioSpeaker(shot) {
+  const type = shot?.audio_reference?.type || null
+  const speaker = String(shot?.audio_reference?.speaker || '').trim()
+  if (speaker) return speaker
+  if (type === 'narration') return '旁白'
+  return ''
 }
 
 function previewTransitionSlot(item) {
@@ -3057,6 +3046,10 @@ button:disabled {
 
 .shot-field {
   margin-bottom: 10px;
+}
+
+.shot-audio-meta {
+  margin-bottom: 6px;
 }
 
 .shot-field label {

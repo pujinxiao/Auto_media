@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -38,6 +39,8 @@ class _StoryContextLockEntry:
 _STORY_CONTEXT_LOCK_TTL_SECONDS = 900.0
 _STORY_CONTEXT_LOCK_MAXSIZE = 512
 _story_context_locks: dict[str, _StoryContextLockEntry] = {}
+APPEARANCE_CACHE_SCHEMA_VERSION = 1
+SCENE_STYLE_CACHE_SCHEMA_VERSION = 1
 
 
 APPEARANCE_SYSTEM_PROMPT = """
@@ -95,6 +98,30 @@ def _trim_words(text: str, limit: int) -> str:
     if len(words) <= limit:
         return _collapse_spaces(text).strip(" ,.;:!?，。；：！？、")
     return " ".join(words[:limit]).strip(" ,.;:!?，。；：！？、")
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _attach_cache_metadata(
+    entry: Mapping[str, Any],
+    *,
+    schema_version: int,
+    provider: str,
+    model: str,
+    updated_at: str,
+) -> dict[str, Any]:
+    normalized = dict(entry)
+    normalized["schema_version"] = schema_version
+    normalized["updated_at"] = updated_at
+    source_provider = _collapse_spaces(provider).lower()
+    if source_provider:
+        normalized["source_provider"] = source_provider
+    source_model = _collapse_spaces(model)
+    if source_model:
+        normalized["source_model"] = source_model
+    return normalized
 
 
 _PROVIDER_KEY_ATTRS = {
@@ -208,12 +235,13 @@ async def extract_character_appearance(
     model: str = "",
     api_key: str = "",
     base_url: str = "",
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, Any]]:
     characters = list(story.get("characters") or [])
     if not characters:
         return {}
 
     llm = get_llm_provider(provider, model=model, api_key=api_key, base_url=base_url)
+    updated_at = _utc_timestamp()
     character_payload = [
         {
             "id": character.get("id", ""),
@@ -262,7 +290,13 @@ async def extract_character_appearance(
             continue
         normalized_entry = _normalize_appearance_entry(str(character.get("description", "")), entry)
         if normalized_entry:
-            output[char_id] = normalized_entry
+            output[char_id] = _attach_cache_metadata(
+                normalized_entry,
+                schema_version=APPEARANCE_CACHE_SCHEMA_VERSION,
+                provider=provider,
+                model=model,
+                updated_at=updated_at,
+            )
     return {identifier: value for identifier, value in output.items() if any(value.values())}
 
 
@@ -279,6 +313,7 @@ async def extract_scene_style_cache(
         return []
 
     llm = get_llm_provider(provider, model=model, api_key=api_key, base_url=base_url)
+    updated_at = _utc_timestamp()
     raw, _ = await llm.complete_messages_with_usage(
         system=SCENE_STYLE_SYSTEM_PROMPT,
         messages=[
@@ -312,12 +347,18 @@ async def extract_scene_style_cache(
         negative_prompt = _trim_words(str(style.get("negative_prompt", "")), 12)
         if image_extra or video_extra or negative_prompt:
             output.append(
-                {
-                    "keywords": [_collapse_spaces(str(keyword)) for keyword in keywords if str(keyword).strip()],
-                    "image_extra": image_extra,
-                    "video_extra": video_extra,
-                    "negative_prompt": negative_prompt,
-                }
+                _attach_cache_metadata(
+                    {
+                        "keywords": [_collapse_spaces(str(keyword)) for keyword in keywords if str(keyword).strip()],
+                        "image_extra": image_extra,
+                        "video_extra": video_extra,
+                        "negative_prompt": negative_prompt,
+                    },
+                    schema_version=SCENE_STYLE_CACHE_SCHEMA_VERSION,
+                    provider=provider,
+                    model=model,
+                    updated_at=updated_at,
+                )
             )
     return output[:3]
 

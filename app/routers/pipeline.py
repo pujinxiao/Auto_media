@@ -468,31 +468,58 @@ def _build_transition_prompt(
     parts = [
         "Short cinematic transition between two adjacent storyboard shots.",
         "Stay inside the same story beat and visual theme.",
+        "Use the previous shot's extracted last frame and the next shot's extracted first frame as hard transition anchors.",
         f"Start from the exact ending frame of: {from_desc or from_frame or from_prompt or from_subject}.",
         f"Arrive at the exact opening frame of: {to_desc or to_frame or to_prompt or to_subject}.",
         "Create one smooth, physically plausible bridging motion instead of a hard jump.",
+        "The transition must feel smooth and natural in character motion, environment continuity, and camera motion.",
         "Keep identity, outfit, props, environment logic, lighting direction, and camera continuity consistent.",
         "Do not introduce new characters, unrelated props, new locations, costume changes, or off-theme action.",
+        "Avoid pose popping, identity drift, outfit drift, anatomy warping, background morphing, lighting flicker, or abrupt camera snaps.",
     ]
     if from_action or to_action:
         parts.append(f"Action bridge: move naturally from {from_action or from_desc or from_prompt} into {to_action or to_desc or to_prompt}.")
     if from_camera_phrase or to_camera_phrase:
-        parts.append(f"Camera continuity: begin with {from_camera_phrase or 'the current framing'} and settle into {to_camera_phrase or 'the destination framing'} with smooth motion.")
+        parts.append(
+            f"Camera continuity: begin with {from_camera_phrase or 'the current framing'} and settle into {to_camera_phrase or 'the destination framing'} with smooth natural easing, not a sudden cut, snap zoom, or jerky pan."
+        )
     if from_environment or to_environment:
         parts.append(
-            f"Environment continuity: preserve the visible space and props from {from_environment or from_desc} into {to_environment or to_desc} without abrupt layout changes."
+            f"Environment continuity: preserve the visible space and props from {from_environment or from_desc} into {to_environment or to_desc} without abrupt layout changes, location drift, or prop teleportation."
         )
     if from_lighting or to_lighting:
         parts.append(
-            f"Lighting continuity: keep the light direction and color stable from {from_lighting or 'the previous frame'} toward {to_lighting or 'the next frame'}."
+            f"Lighting continuity: keep the light direction and color stable from {from_lighting or 'the previous frame'} toward {to_lighting or 'the next frame'}, avoiding flicker or sudden contrast jumps."
         )
     if from_subject or to_subject:
-        parts.append(f"Subject continuity: keep the same appearance and silhouette from {from_subject or to_subject} to {to_subject or from_subject}.")
+        parts.append(
+            f"Subject continuity: keep the same appearance and silhouette from {from_subject or to_subject} to {to_subject or from_subject}, with natural anatomy, stable facial identity, and unchanged primary outfit."
+        )
     if bridge:
         parts.append(f"Narrative bridge: {bridge}.")
     if hint:
         parts.append(f"User emphasis: {hint}.")
     return _collapse_spaces(" ".join(parts))
+
+
+def _transition_negative_prompt() -> str:
+    return ", ".join(
+        [
+            "identity drift",
+            "wrong face",
+            "pose popping",
+            "warped anatomy",
+            "limb distortion",
+            "outfit drift",
+            "background morphing",
+            "environment swap",
+            "prop teleportation",
+            "lighting flicker",
+            "camera jitter",
+            "abrupt cut",
+            "snap zoom",
+        ]
+    )
 
 
 def _merge_negative_prompts(*prompts: str) -> str:
@@ -1306,6 +1333,7 @@ async def generate_transition(
     negative_prompt = _merge_negative_prompts(
         str(from_payload.get("negative_prompt", "")),
         str(to_payload.get("negative_prompt", "")),
+        _transition_negative_prompt(),
     )
 
     transition_id = f"transition_{req.from_shot_id}__{req.to_shot_id}"

@@ -363,7 +363,16 @@
               </div>
               <div class="transition-preview-strip">
                 <div class="transition-frame">
-                  <div class="transition-frame-label">前镜参考帧</div>
+                  <div class="transition-frame-label">
+                    前镜参考帧
+                    <span
+                      v-if="item.result?.first_frame_source"
+                      class="transition-frame-origin"
+                      :title="item.result.first_frame_source.extraction_error || item.result.first_frame_source.diagnostic_note || ''"
+                    >
+                      {{ formatTransitionFrameSourceChip(item.result.first_frame_source, '前镜') }}
+                    </span>
+                  </div>
                   <img
                     v-if="item.result?.first_frame_source?.extracted_image_url || item.fromShot.image_url"
                     :src="getMediaUrl(item.result?.first_frame_source?.extracted_image_url || item.fromShot.image_url)"
@@ -376,7 +385,16 @@
                   <span class="transition-arrow-text">过渡</span>
                 </div>
                 <div class="transition-frame">
-                  <div class="transition-frame-label">后镜首部</div>
+                  <div class="transition-frame-label">
+                    后镜首部
+                    <span
+                      v-if="item.result?.last_frame_source"
+                      class="transition-frame-origin"
+                      :title="item.result.last_frame_source.extraction_error || item.result.last_frame_source.diagnostic_note || ''"
+                    >
+                      {{ formatTransitionFrameSourceChip(item.result.last_frame_source, '后镜') }}
+                    </span>
+                  </div>
                   <img
                     v-if="item.result?.last_frame_source?.extracted_image_url || item.toShot.image_url"
                     :src="getMediaUrl(item.result?.last_frame_source?.extracted_image_url || item.toShot.image_url)"
@@ -392,15 +410,21 @@
                 class="shot-video"
               ></video>
               <p class="transition-copy">
-                {{ item.result?.video_url
+                {{ item.result?.diagnostic_summary || (item.result?.video_url
                   ? '过渡视频已生成。当前会严格使用前镜最后一帧和后镜第一帧，并要求过渡平滑、人物环境稳定、镜头衔接自然。'
                   : item.ready
                     ? '前后镜头视频已就绪，可以生成过渡片段。后端会只读取这两个相邻视频的对应帧，并强调平滑自然的人物、环境与镜头连续性。'
                     : '等待前后镜头视频都准备好后，再进入可生成状态。'
-                }}
+                ) }}
               </p>
               <div class="transition-meta">
                 <span class="transition-chip">建议时长 1-2s</span>
+                <span v-if="item.result?.first_frame_source" class="transition-chip">
+                  {{ item.result.first_frame_source.diagnostic_note }}
+                </span>
+                <span v-if="item.result?.last_frame_source" class="transition-chip">
+                  {{ item.result.last_frame_source.diagnostic_note }}
+                </span>
                 <span class="transition-pill" :class="{ active: !!item.fromShot.video_url }">前镜视频</span>
                 <span class="transition-pill" :class="{ active: !!item.toShot.video_url }">后镜视频</span>
               </div>
@@ -505,6 +529,14 @@ const transitionTimeline = computed(() => {
 
 function buildTransitionId(fromShotId, toShotId) {
   return `transition_${fromShotId}__${toShotId}`
+}
+
+function formatTransitionFrameSourceChip(frameSource, sideLabel = '') {
+  if (!frameSource || typeof frameSource !== 'object') return ''
+  const prefix = sideLabel ? `${sideLabel}` : ''
+  return frameSource.source_type === 'storyboard_image_fallback'
+    ? `${prefix}回退分镜图`
+    : `${prefix}视频抽帧`
 }
 
 function buildLocalTimeline(shotsList = [], transitionsMap = {}) {
@@ -2870,10 +2902,27 @@ button:disabled {
 }
 
 .transition-frame-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   font-size: 10px;
   color: #8f7d59;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.transition-frame-origin {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(183, 133, 45, 0.12);
+  color: #8e6320;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .transition-frame-image,

@@ -12,6 +12,12 @@ from typing import Any, Mapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.consistency_cache import (
+    APPEARANCE_CACHE_SCHEMA_VERSION,
+    SCENE_STYLE_CACHE_SCHEMA_VERSION,
+    is_appearance_cache_entry_compatible,
+    is_scene_style_cache_entry_compatible,
+)
 from app.core.story_assets import (
     build_character_asset_record,
     get_character_asset_entry,
@@ -39,8 +45,6 @@ class _StoryContextLockEntry:
 _STORY_CONTEXT_LOCK_TTL_SECONDS = 900.0
 _STORY_CONTEXT_LOCK_MAXSIZE = 512
 _story_context_locks: dict[str, _StoryContextLockEntry] = {}
-APPEARANCE_CACHE_SCHEMA_VERSION = 1
-SCENE_STYLE_CACHE_SCHEMA_VERSION = 1
 
 
 APPEARANCE_SYSTEM_PROMPT = """
@@ -182,26 +186,33 @@ def _get_story_context_lock(story_id: str) -> asyncio.Lock:
     return entry.lock
 
 
-def _missing_appearance_cache_names(story: Mapping[str, Any]) -> set[str]:
+def _appearance_cache_identifiers_to_refresh(story: Mapping[str, Any]) -> set[str]:
     characters = list(story.get("characters") or [])
     meta = dict(story.get("meta") or {})
     cached = dict(meta.get("character_appearance_cache") or {})
-    return {
-        identifier
-        for character in characters
-        for identifier in [_collapse_spaces(str(character.get("id", ""))) or _collapse_spaces(str(character.get("name", "")))]
-        if identifier and identifier not in cached
-    }
+    identifiers: set[str] = set()
+    for character in characters:
+        identifier = _collapse_spaces(str(character.get("id", ""))) or _collapse_spaces(str(character.get("name", "")))
+        if not identifier:
+            continue
+        if not is_appearance_cache_entry_compatible(cached.get(identifier)):
+            identifiers.add(identifier)
+    return identifiers
 
 
 def _needs_appearance_cache(story: Mapping[str, Any]) -> bool:
-    return bool(_missing_appearance_cache_names(story))
+    return bool(_appearance_cache_identifiers_to_refresh(story))
 
 
 def _needs_scene_style_cache(story: Mapping[str, Any]) -> bool:
+    if not story.get("selected_setting"):
+        return False
     meta = dict(story.get("meta") or {})
     cached = meta.get("scene_style_cache") or []
-    return bool(story.get("selected_setting")) and not cached
+    if not isinstance(cached, list) or not cached:
+        return True
+    compatible_entries = [entry for entry in cached if is_scene_style_cache_entry_compatible(entry)]
+    return not compatible_entries or len(compatible_entries) != len(cached)
 
 
 def _has_effective_llm_credentials(provider: str, api_key: str) -> bool:
@@ -441,7 +452,7 @@ async def prepare_story_context(
             if _needs_appearance_cache(story):
                 try:
                     appearance_cache = dict((story.get("meta") or {}).get("character_appearance_cache") or {})
-                    missing_identifiers = _missing_appearance_cache_names(story)
+                    refresh_identifiers = _appearance_cache_identifiers_to_refresh(story)
                     extracted = await extract_character_appearance(
                         story,
                         provider=provider,
@@ -452,7 +463,7 @@ async def prepare_story_context(
                     extracted = {
                         identifier: value
                         for identifier, value in extracted.items()
-                        if identifier in missing_identifiers and identifier not in appearance_cache
+                        if identifier in refresh_identifiers
                     }
                     if extracted:
                         appearance_cache.update(extracted)

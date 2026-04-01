@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.core.story_assets import get_character_visual_dna
+from app.core.story_assets import get_character_appearance_cache_entry, get_character_visual_dna
 
 
 def _normalize_text(value: Any) -> str:
@@ -188,6 +188,7 @@ def _safe_build_character_reference_anchor(
     *,
     character_id: str,
     description: str,
+    appearance_entry: Mapping[str, Any] | None = None,
 ) -> str:
     try:
         from app.core.story_context import build_character_reference_anchor
@@ -199,6 +200,7 @@ def _safe_build_character_reference_anchor(
         name,
         character_id=character_id,
         description=description,
+        appearance_entry=appearance_entry,
     )
 
 
@@ -242,6 +244,8 @@ def serialize_story_to_script(
     lines: list[str] = []
     characters = story.get("characters", []) or []
     character_images = story.get("character_images", {}) or {}
+    meta = story.get("meta") if isinstance(story.get("meta"), Mapping) else {}
+    appearance_cache = meta.get("character_appearance_cache") if isinstance(meta.get("character_appearance_cache"), Mapping) else {}
     if characters:
         lines.append("# 角色信息")
         for character in characters:
@@ -253,17 +257,23 @@ def serialize_story_to_script(
             description = _normalize_text(character.get("description"))
             lines.append(f"- {name}（{role}）：{description}")
 
+            appearance_entry = get_character_appearance_cache_entry(
+                appearance_cache,
+                char_id,
+                name=name,
+            )
             visual_dna = get_character_visual_dna(character_images, char_id, name=name)
             reference_anchor = _safe_build_character_reference_anchor(
                 character_images,
                 name,
                 character_id=char_id,
                 description=description,
+                appearance_entry=appearance_entry,
             )
-            if visual_dna:
+            if reference_anchor:
+                lines.append(f"  Visual DNA: {reference_anchor}")
+            elif visual_dna:
                 lines.append(f"  Visual DNA: {visual_dna}")
-            elif reference_anchor:
-                lines.append(f"  角色参考锚点: {reference_anchor}")
         lines.append("")
 
     for index, block in enumerate(serialized_episode_blocks):

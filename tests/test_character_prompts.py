@@ -79,6 +79,33 @@ class CharacterPromptTests(unittest.TestCase):
         self.assertIn("Visual DNA: young man, short black hair, slim build", section)
         self.assertNotIn("Standard three-view character turnaround sheet", section)
 
+    def test_build_character_section_prefers_appearance_cache_over_legacy_visual_dna(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发，穿着深蓝长衫。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair, brown cloak",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    }
+                },
+                "meta": {
+                    "character_appearance_cache": {
+                        "char_li_ming": {
+                            "body": "young man, short black hair, slim build",
+                            "clothing": "dark blue robe",
+                        }
+                    }
+                },
+            }
+        )
+
+        self.assertIn("Visual DNA: young man, short black hair, slim build; dark blue robe", section)
+        self.assertNotIn("brown cloak", section)
+
     def test_build_character_section_visual_dna_keeps_clothing_fallback(self):
         section = build_character_section(
             {

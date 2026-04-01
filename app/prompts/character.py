@@ -3,6 +3,7 @@
 """
 角色视觉相关提示词与构建函数（Step 2.5 / Step 5）
 """
+from collections.abc import Mapping
 from typing import Optional
 
 from app.core.character_profile import (
@@ -66,11 +67,16 @@ def build_character_prompt(name: str, role: str, description: str, art_style: st
 def build_character_section(character_info: Optional[dict]) -> str:
     """构建传给分镜 LLM 的角色参考信息块。"""
     from app.core.story_context import build_character_reference_anchor
+    from app.core.story_assets import get_character_appearance_cache_entry
 
     if not character_info:
         return ""
     characters = character_info.get("characters", [])
     character_images = character_info.get("character_images", {})
+    meta = character_info.get("meta") if isinstance(character_info.get("meta"), Mapping) else {}
+    appearance_cache = character_info.get("character_appearance_cache")
+    if not isinstance(appearance_cache, Mapping):
+        appearance_cache = meta.get("character_appearance_cache") if isinstance(meta.get("character_appearance_cache"), Mapping) else {}
     if not characters:
         return ""
 
@@ -89,6 +95,7 @@ def build_character_section(character_info: Optional[dict]) -> str:
             name,
             character_id=char_id,
             description=desc,
+            appearance_entry=get_character_appearance_cache_entry(appearance_cache, char_id, name=name),
         )
         if visual_anchor:
             lines.append(f"  Visual DNA: {visual_anchor}")

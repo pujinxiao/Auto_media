@@ -1,6 +1,6 @@
 # 全流程一致性实施计划
 
-> 更新日期：2026-03-31
+> 更新日期：2026-04-01
 >
 > 文档定位：基于当前仓库实际代码、测试、README 与已落地接口，重新整理“全流程一致性”现状、缺口、优先级与实施顺序。
 >
@@ -159,28 +159,38 @@ Story / selected_setting / characters / art_style
     - shot `negative_prompt`
     - `ctx.global_negative_prompt`
     - 命中角色锁定信息里的 `negative_prompt`
+    - 命中已知角色时额外补充一组运行期人物一致性负面约束（换脸、换发型、主衣物漂移、服装颜色/材质漂移、配饰缺失、肢体异常、多人重复等）
     - 命中 Scene Reference 后追加的环境一致性负面约束
   - `reference_images` 会合并去重：
     - shot 自带 `reference_images`
     - 命中的角色设定图
     - 命中的场景环境图
+    - 同场景上一张已生成主镜头图（图片批量生成链路，以及 auto chained 策略里的图片阶段，都会作为下一张图的 continuity 参考）
   - 若 provider 因 `negative_prompt` 返回 400/422，会先去掉它再重试。
   - 若仍因 `reference_images` 返回 400/422，会继续去掉参考图再重试。
 - 视频服务：`app/services/video.py`
   - 主镜头视频支持单首帧 I2V
   - `negative_prompt` 已作为运行期参数保留并传入 provider
+  - 视频入口 / 手动页 / pipeline executor 当前也会保留 `reference_images` 元数据，不再在 runtime prepare 阶段直接丢失；但普通主镜头视频请求本身仍主要只实际消费 `image_url` 首帧图，当前并没有把通用 `reference_images` 列表原生下发给 video provider
   - 但 provider 支持度并不完全一致：
     - `dashscope` / `minimax` / `kling` 当前会原生透传 `negative_prompt`
-    - `doubao` 当前保留接口参数，但 provider 实现里明确忽略原生 `negative_prompt`
+    - `doubao` 当前仍不支持原生 `negative_prompt` 字段，但运行期已经把高优先级身份 / 服装 / 解剖 / 背景 / 镜头抖动 guardrails 折叠进优化后的文本提示词，降低人物漂移和突变风险
   - 双帧只对支持双帧的 provider 开放
 
 #### F. 主镜头与 transition 的边界已经明确
 
 - 普通主镜头统一走单首帧 I2V。
 - `last_frame_prompt / last_frame_url` 已从主镜头主链路退出，只保留兼容痕迹。
+- 运行期主镜头视频 prompt 当前已经额外注入：
+  - 身份锁
+  - 主衣物锁
+  - 动作幅度必须清晰可见
+  - 运镜幅度必须可读
+  - 肢体 / 手部 / 解剖保持稳定
 - transition 只允许相邻镜头。
 - transition 必须建立在已有主镜头视频之上。
 - transition 的首尾锚点优先从相邻主镜头视频抽帧；抽帧失败时会回退到已有静态分镜图。
+- transition 的前镜尾帧当前会从更贴近视频末尾的位置抽取，避免过早抽到仍处在明显运动中的尾段画面。
 
 #### G. 手动页、单资产接口、自动流水线都已经具备状态持久化
 
@@ -191,7 +201,15 @@ Story / selected_setting / characters / art_style
   - `story.meta.storyboard_generation`
 - 单资产接口在请求显式提供 `pipeline_id`，或能从恢复态解析出 `pipeline_id` 时，也会同步写入：
   - `pipeline.generated_files`
-- 自动 `auto-generate` 当前仍以 `pipeline` 为主要运行态真相源。
+- 自动 `auto-generate` 当前会按阶段持续写入 `pipeline.generated_files`，至少包含：
+  - `storyboard`
+  - `tts`
+  - `images`
+  - `videos`
+  - `meta`
+- 自动 `auto-generate` 在提供 `story_id` 时，也会把上述运行态快照镜像到：
+  - `story.meta.storyboard_generation`
+- 因此自动流水线当前仍以 `pipeline` 为主要运行态真相源，但 restore / history 不再只能依赖手动链路写回。
 - `storyboard_generation` 当前不仅保存恢复态，也会镜像部分 `generated_files`、`shots`、`pipeline_id`、`project_id`、`story_id`、`final_video_url`。
 - 手动 runtime 在解析“当前 storyboard shot 列表”时，当前优先级是：
   - `storyboard_generation.shots`
@@ -292,6 +310,12 @@ transition 与 concat 更偏向读取 pipeline 当前真实资产，而不是只
 2. 缺失时回退到 `character_images.visual_dna`
 3. 再缺失时回退到 `design_prompt / description` 清洗结果
 
+这条优先级当前已经落到多个消费入口：
+
+- `build_story_context()`
+- 分镜角色参考块 `build_character_section()`
+- `serialize_story_to_script()`
+
 同时，`prepare_story_context()` 还会把抽取出的 `body` 投影回 `character_images.visual_dna`。
 
 这说明项目现状不是“完全去掉 visual_dna”，而是：
@@ -373,6 +397,7 @@ transition 与 concat 更偏向读取 pipeline 当前真实资产，而不是只
      - shot 自带参考图
      - 角色设定图
      - 场景环境图
+     - 同场景上一张已生成主镜头图（图片批量生成与 chained video 的图片阶段）
 3. 视频生成提示词与参考资产
    - 运行期主字段是：
      - `final_video_prompt`
@@ -582,17 +607,21 @@ Story data
 
 ## 6. 分阶段实施顺序
 
-### Phase 1：先把运行期契约和文档口径收口（状态：进行中，已基本收口）
+### Phase 1：先把运行期契约和文档口径收口（状态：已完成，主文档口径已对齐）
 
 #### 当前状态
 
-本文件已按当前仓库状态大幅收口，但“所有主要文档都完全一致”这件事还没彻底完成。
+当前主文档口径已经完成一轮显式对齐，`README`、`video-pipeline`、`feature-documentation`、`database-persistence-implementation` 与本文件的主边界已基本一致。
 
 当前完成情况：
 
 - `[已完成]` 本文档已统一 `StoryContext`、`storyboard_generation`、`pipeline.generated_files`、transition、ID-first 口径
 - `[已完成]` 当前仍保留的 fallback / legacy path 已在文档里显式标出
-- `[进行中]` 其他主要文档仍需继续按同一口径同步
+- `[已完成]` 主要现状文档已同步到同一套运行期边界：
+  - `README.md`
+  - `docs/video-pipeline.md`
+  - `docs/feature-documentation.md`
+  - `docs/database-persistence-implementation.md`
 
 已经有的基础：
 
@@ -604,9 +633,9 @@ Story data
 
 仍然存在的问题：
 
-1. 旧文档对 `storyboard_generation` 与 `generated_files` 的职责写得过粗。
-2. 个别入口仍保留 fallback builder。
-3. auto / manual / single asset / transition 的统一口径还没有完全钉死。
+1. 个别入口仍保留 fallback builder。
+2. auto / manual / single asset / transition 的统一口径虽然已有文档与测试基线，但人工收官还没真正执行。
+3. `visual_dna` 仍是兼容投影层，尚未进入最终退役节奏。
 
 #### 本阶段目标
 
@@ -626,7 +655,7 @@ Story data
 2. 所有主要文档对状态边界描述一致。
 3. 后续开发者不会再误以为 `storyboard_generation` 是唯一真相源。
 
-### Phase 2：把结构化缓存契约做硬（状态：进行中，关键元数据已落地）
+### Phase 2：把结构化缓存契约做硬（状态：进行中，主消费链路已进一步收口）
 
 #### 当前状态
 
@@ -635,8 +664,13 @@ Story data
 当前完成情况：
 
 - `[已完成]` `schema_version / source_provider / source_model / updated_at` 已落地
+- `[已完成]` 不兼容未来 schema 的缓存已不会继续被运行期直接消费，且会触发按需刷新
 - `[已完成]` 提取失败不污染已有缓存的写回边界已成立
 - `[已完成]` story 归一化已覆盖缓存 metadata 字段
+- `[已完成]` `character_appearance_cache` 在存在时，已经优先进入：
+  - `build_story_context()`
+  - 分镜角色参考块 `build_character_section()`
+  - `serialize_story_to_script()`
 - `[进行中]` `visual_dna` 的最终退役策略尚未定稿
 
 现状：
@@ -644,8 +678,10 @@ Story data
 1. `character_appearance_cache` 已稳定消费 `body / clothing / negative_prompt`
 2. `scene_style_cache` 已稳定消费 `keywords / image_extra / video_extra / negative_prompt`
 3. `schema_version / source_provider / source_model / updated_at` 已经落地
-4. `normalize_story_record()` 已能归一化上述 metadata 字段
-5. `visual_dna` 仍处于兼容投影层，尚未决定最终退役节奏
+4. runtime 当前会忽略超前 schema 的缓存，并在有可用 LLM 凭证时按需刷新
+5. `normalize_story_record()` 已能归一化上述 metadata 字段
+6. 分镜角色参考块与 storyboard-script 输入层在有结构化缓存时，已经优先消费 `character_appearance_cache`
+7. `visual_dna` 仍处于兼容投影层，尚未决定最终退役节奏
 
 #### 本阶段目标
 
@@ -664,16 +700,29 @@ Story data
 2. 缓存写入失败不会破坏现有稳定结果。
 3. 结构化缓存成为更明确的主数据源。
 
-### Phase 3：做全入口一致性验收（状态：进行中，已有局部验收与测试保护）
+### Phase 3：做全入口一致性验收（状态：进行中，已完成显式最小基线验收）
 
 #### 当前状态
 
-主方向正确，而且已经有不少跨入口保护，但还没有完成一次面向所有入口的统一验收。
+主方向正确，而且已经补上一轮显式最小基线验收；当前剩余缺口主要是基于真实故事样本的人工收官。
 
 当前完成情况：
 
 - `[已完成]` 已有多条单元测试和集成测试覆盖手动/单资产/恢复/transition 边界
-- `[进行中]` 仍缺一轮显式的全入口一次性验收结论
+- `[已完成]` `auto-generate` 已补齐运行态持久化与 restore 基线测试，覆盖成功写回与中途失败保留快照
+- `[已完成]` 已补充固定样本 story、seed 脚本与人工验收 runbook：
+  - `docs/phase3_manual_acceptance_story.json`
+  - `scripts/manual/seed_phase3_manual_story.py`
+  - `docs/phase3-manual-acceptance-runbook.md`
+- `[已完成]` 固定样本故事已按当前最关键风险重新收紧，用于专门压测：
+  - 首帧图不能只剩脸
+  - 双手 / 上半身 / 道具必须在首帧就建立
+  - 同场景相邻镜头必须保持连续剧情感，而不是重置成独立海报图
+- `[已完成]` 已按文档推荐基线跑通：
+  - `uv run python -m unittest discover -s tests -q`
+  - `node --test frontend/src/utils/storyChat.test.js frontend/src/utils/storyChat.multiline-sections.test.js frontend/src/utils/storyChat.numbering.test.js`
+  - `npm --prefix frontend run build`
+- `[进行中]` 仍缺一轮基于该固定样本的真实人工串行验收结论（auto / manual / single asset / transition / concat / restore）
 
 需要一起看的入口：
 
@@ -1049,7 +1098,7 @@ Judge 重点：
    - 当前没有统一的运行期 `reference_images` 字段
 2. 图片生成阶段
    - 统一参考资产入口是 `reference_images`
-   - 来源可包括角色设定图、场景环境图、shot 自带参考图
+   - 来源可包括角色设定图、场景环境图、shot 自带参考图、同场景上一张已生成主镜头图
 3. 视频生成阶段
    - 普通主镜头的主要视觉参考资产是 `image_url` 首帧图
    - transition 的主要视觉参考资产是 `first_frame_url / last_frame_url`
@@ -1092,6 +1141,18 @@ uv run python -m unittest discover -s tests -q
 node --test frontend/src/utils/storyChat.test.js frontend/src/utils/storyChat.multiline-sections.test.js frontend/src/utils/storyChat.numbering.test.js
 npm --prefix frontend run build
 ```
+
+本轮实际执行结论（2026-04-01）：
+
+1. 上述三条最小基线均已实际跑通。
+2. 为保证基线稳定通过，已额外收口两处环境敏感问题：
+   - `start.py` 在 Windows 解析 `ffmpeg` 时，优先使用 `winget` 包内二进制，避免被宿主机 Unix 常见目录误命中。
+   - `tests/test_story_mainline.py` 显式固定 `story_llm.settings.debug = True`，避免测试结果被本机 `.env` 漂移污染。
+3. Phase 3 剩余的人工收官，当前已具备固定样本、seed 脚本与 runbook，但尚未执行真实 provider 的整轮人工串行验收。
+
+若要执行 Phase 3 剩余的人工收官，当前推荐直接按这份 runbook 走：
+
+- `docs/phase3-manual-acceptance-runbook.md`
 
 若开始接入 DSPy，建议额外补一层专项验收：
 
@@ -1148,7 +1209,7 @@ npm --prefix frontend run build
 
 #### B. storyboard 输入层已经稳定成后端能力
 
-1. `serialize_story_to_script()` 已经把角色、Visual DNA、场景标题、环境锚点、情感标尺、关键道具、动作拆解、台词统一序列化。
+1. `serialize_story_to_script()` 已经把角色、Visual DNA、场景标题、环境锚点、情感标尺、关键道具、动作拆解、台词统一序列化，并在存在 `character_appearance_cache` 时优先消费其 `body / clothing`。
 2. `/{story_id}/storyboard-script` 接口已存在。
 3. `selected_scenes` 既支持列表，也支持布尔 map 结构，并会在后端统一归一化。
 4. 前端已经改为显式调用该接口，而不是继续在前端临时拼 storyboard 输入文本。
@@ -1158,7 +1219,7 @@ npm --prefix frontend run build
 1. `app/core/character_profile.py` 已新增，对角色描述中的微观噪声、机关步骤、毫米级细节做清洗。
 2. 角色设定图 prompt 现在更明确地只消费视觉锚点，不再把性格、能力、剧情机关直接塞进角色图 prompt。
 3. 三视图角色设定图 prompt 已明确要求“同一时刻、同一人物、只改变视角”。
-4. 分镜角色参考块优先消费 `visual_dna`，其次回退 `design_prompt / prompt`，进一步压缩“立绘 prompt 直接污染分镜输入”的风险。
+4. 分镜角色参考块现在优先消费 `character_appearance_cache` 的结构化 `body / clothing`，缺失时再回退 `visual_dna` 与 `design_prompt / prompt`，进一步压缩“立绘 prompt 直接污染分镜输入”的风险。
 
 #### D. Scene Reference 已进一步贴近“可复用环境图”
 
@@ -1185,7 +1246,13 @@ npm --prefix frontend run build
 3. 视频侧 provider 能力差异已经在实现里显式保留：
    - `dashscope / minimax / kling` 透传 `negative_prompt`
    - `doubao` 保留参数但原生忽略
-4. transition 当前仍严格建立在相邻主镜头视频资产之上，并优先读 pipeline / storyboard_generation 合并后的真实状态。
+4. 图片一致性链路现在不只覆盖手动 / 单资产图片批量生成，也覆盖 auto chained 策略里的图片阶段：同场景内会把上一张已生成主镜头图继续喂给下一张图。
+5. 图片首帧 prompt 现在会额外约束“必须能支撑后续视频动作”，显式避免：
+   - 图片被收成只剩脸部的独立人像
+   - 视频开场才突然补出原本首帧没建立的手、道具或更大范围身体裁切
+   - `camera_setup.shot_size` 与首帧构图口径冲突
+6. 非首个同场景 shot 当前会额外注入“这是同一场景连续时刻，不是新的独立海报图 / 建立镜头”的运行期提示，减轻跨分镜单独生成时的状态重置感。
+7. transition 当前仍严格建立在相邻主镜头视频资产之上，并优先读 pipeline / storyboard_generation 合并后的真实状态。
 
 #### F. 结构化缓存契约已经推进了一步
 
@@ -1195,8 +1262,9 @@ npm --prefix frontend run build
    - `source_model`
    - `updated_at`
 2. `prepare_story_context()` 在成功抽取后才写入这些缓存 metadata，不会在失败时污染已有缓存。
-3. `normalize_story_record()` 已能归一化这些 metadata 字段。
-4. 这说明 Phase 2 不再是“完全未动”，而是已经完成了最关键的一半。
+3. runtime 现在会跳过不兼容未来 schema 的缓存，并在有凭证时按需刷新这些缓存。
+4. `normalize_story_record()` 已能归一化这些 metadata 字段，并保留未来 schema version 供刷新判定使用。
+5. 这说明 Phase 2 不再是“完全未动”，而是已经完成了最关键的一半。
 
 #### G. 分镜 JSON 归一化已经更严格
 
@@ -1221,6 +1289,31 @@ npm --prefix frontend run build
 10. `tests/test_story_router.py`
 11. `tests/test_story_mainline.py`
 12. `tests/test_pipeline_runtime.py`
+13. `tests/test_image_service_retry.py`
+14. `tests/test_single_frame_mainline.py`
+15. `tests/test_doubao_video_provider.py`
+
+#### I. Phase 3 的最小基线验收已经显式执行
+
+1. 已跑通 `uv run python -m unittest discover -s tests -q`
+2. 已跑通前端 `storyChat` 三组 Node 测试
+3. 已跑通 `npm --prefix frontend run build`
+4. 这意味着 Phase 3 已经从“只有局部保护”推进到“已有一轮明确的最小基线验收结论”
+5. 已新增一条显式的后端全流程模拟测试，覆盖：
+   - `serialize_story_to_script()` 从 story scenes 生成 storyboard 输入文本
+   - `generate_storyboard`
+   - `generate_assets` 的首帧图生成
+   - `render_video`
+   - `generate_transition`
+   - `concat_videos`
+6. 这条模拟测试会额外检查：
+   - 图片首帧构图是否与后续视频动作冲突
+   - 同场景下一镜头图片是否带上上一镜头首帧 continuity 参考
+   - transition prompt / timeline / final export sequence 是否按真实运行态串联
+7. 已新增 auto pipeline persistence tests，额外覆盖：
+   - `run_full_pipeline()` 会把 `storyboard / tts / images / videos / meta` 按阶段写入 `pipeline.generated_files`
+   - 在存在 `story_id` 时，同步镜像到 `story.meta.storyboard_generation`
+   - auto 链路中途失败时，最新 storyboard 快照不会被后续失败状态清空，便于 restore / history 排查
 
 ### 当前仍未执行或未完全完成的内容
 
@@ -1234,9 +1327,9 @@ npm --prefix frontend run build
 
 因此 Phase 5 仍应保留为后续动作，不能误标成已完成。
 
-#### 2. 全入口一致性验收还没做成“一次性收官”
+#### 2. 全入口一致性验收还没做成“人工收官”
 
-虽然已经有不少测试和状态恢复逻辑，但还没有完成一轮显式的统一验收来一起钉死：
+虽然现在已经完成了一轮显式最小基线验收，而且相关代码路径已有测试覆盖，但仍缺一轮基于真实故事样本的人工串行验收来一起钉死：
 
 1. auto
 2. manual
@@ -1245,7 +1338,9 @@ npm --prefix frontend run build
 5. concat
 6. restore
 
-所以 Phase 3 当前更准确的状态仍是“进行中”。
+当前已经补上固定样本、seed 脚本和 runbook，但还没把这轮 runbook 真正执行完并记录结论。
+
+所以 Phase 3 当前更准确的状态是“进行中，最小基线已完成，人工收官已有固定样本与执行方案，但验收结论待补”。
 
 #### 3. DSPy / Judge / Feedback Loop 仍未正式开始
 
@@ -1260,8 +1355,8 @@ npm --prefix frontend run build
 
 ### 当前推荐顺序（按实际修改后重排）
 
-1. 先继续把文档口径与已有实现对齐，并把缓存契约剩余收口做完。
-2. 再做全入口一致性验收，把当前已落地能力真正钉死。
+1. 先按 `docs/phase3-manual-acceptance-runbook.md` 执行一轮基于固定样本的人工全入口验收，把当前已落地能力真正钉死。
+2. 再根据人工验收结论，决定 `visual_dna` 兼容层的保留边界与后续退役节奏。
 3. 人工检查通过后，再推进 DSPy / Judge / Feedback Loop。
 4. DSPy 阶段完成后，再做一轮人工检查与专项验收。
 5. 最后再收最危险的 fallback / legacy path，避免过早混入回归来源。

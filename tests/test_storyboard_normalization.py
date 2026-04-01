@@ -1,24 +1,7 @@
-import sys
-import types
 import unittest
 
-
-if "pydantic" not in sys.modules:
-    pydantic_stub = types.ModuleType("pydantic")
-
-    class _BaseModel:
-        pass
-
-    class _ValidationError(Exception):
-        pass
-
-    def _field(*args, **kwargs):
-        return None
-
-    pydantic_stub.BaseModel = _BaseModel
-    pydantic_stub.ValidationError = _ValidationError
-    pydantic_stub.Field = _field
-    sys.modules["pydantic"] = pydantic_stub
+import sys
+import types
 
 llm_factory_stub = types.ModuleType("app.services.llm.factory")
 llm_factory_stub.get_llm_provider = lambda *args, **kwargs: None

@@ -5,6 +5,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from app.core.character_profile import sanitize_character_profile_description
+from app.core.consistency_cache import coerce_cache_schema_version
 
 
 def _normalize_text(value: Any) -> str:
@@ -22,14 +23,11 @@ def _new_character_id() -> str:
 def _normalize_cache_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(dict(entry or {}))
 
-    schema_version = normalized.get("schema_version")
-    if schema_version in (None, ""):
+    schema_version = coerce_cache_schema_version(normalized.get("schema_version"))
+    if schema_version is None:
         normalized.pop("schema_version", None)
     else:
-        try:
-            normalized["schema_version"] = int(schema_version)
-        except (TypeError, ValueError):
-            normalized.pop("schema_version", None)
+        normalized["schema_version"] = schema_version
 
     for key in ("source_provider", "source_model", "updated_at"):
         value = _normalize_text(normalized.get(key))

@@ -223,9 +223,15 @@ async def build_storyboard_script(
     if not story.get("scenes", []):
         raise HTTPException(status_code=404, detail="剧本尚未生成，请先调用 generate-script")
 
+    selected_scene_numbers = None
+    if isinstance(body, dict):
+        raw_selected_scenes = body.get("selected_scenes")
+        if isinstance(raw_selected_scenes, dict):
+            selected_scene_numbers = raw_selected_scenes
+
     script_text = serialize_story_to_script(
         story,
-        selected_scene_numbers=(body or {}).get("selected_scenes") if isinstance(body, dict) else None,
+        selected_scene_numbers=selected_scene_numbers,
     )
     return {"story_id": story_id, "script": script_text}
 

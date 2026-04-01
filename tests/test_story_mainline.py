@@ -112,12 +112,15 @@ class StoryMockTests(unittest.IsolatedAsyncioTestCase):
 
 class StoryMainlineFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.debug_patch = patch("app.services.story_llm.settings.debug", True)
+        self.debug_patch.start()
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
     async def asyncTearDown(self):
+        self.debug_patch.stop()
         await self.engine.dispose()
 
     async def test_analyze_idea_persists_seed_story(self):

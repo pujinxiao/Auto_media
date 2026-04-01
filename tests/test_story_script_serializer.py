@@ -1,54 +1,4 @@
 import unittest
-import sys
-import types
-
-
-if "pydantic" not in sys.modules:
-    pydantic_stub = types.ModuleType("pydantic")
-
-    def _model_validator(*, mode=None):
-        def decorator(fn):
-            fn.__pydantic_model_validator_mode__ = mode
-            return fn
-        return decorator
-
-    class _BaseModel:
-        def __init_subclass__(cls, **kwargs):
-            super().__init_subclass__(**kwargs)
-            validators = []
-            for value in cls.__dict__.values():
-                func = getattr(value, "__func__", value)
-                validator_mode = getattr(value, "__pydantic_model_validator_mode__", None) or getattr(
-                    func,
-                    "__pydantic_model_validator_mode__",
-                    None,
-                )
-                if validator_mode:
-                    validators.append((validator_mode, func))
-            cls.__pydantic_validators__ = validators
-
-        def __init__(self, **data):
-            payload = dict(data)
-            for mode, validator in getattr(self.__class__, "__pydantic_validators__", []):
-                if mode == "before":
-                    payload = validator(self.__class__, payload)
-            for key, value in payload.items():
-                setattr(self, key, value)
-            for mode, validator in getattr(self.__class__, "__pydantic_validators__", []):
-                if mode == "after":
-                    validator(self)
-
-    class _ValidationError(Exception):
-        pass
-
-    def _field(*args, **kwargs):
-        return None
-
-    pydantic_stub.BaseModel = _BaseModel
-    pydantic_stub.Field = _field
-    pydantic_stub.ValidationError = _ValidationError
-    pydantic_stub.model_validator = _model_validator
-    sys.modules["pydantic"] = pydantic_stub
 
 from app.core.story_script import serialize_story_to_script
 from app.schemas.story import StoryboardScriptRequest
@@ -113,6 +63,52 @@ class StoryScriptSerializerTests(unittest.TestCase):
         self.assertIn("- 台词/旁白：沈砚：不能再等了。", script)
         self.assertIn("【动作拆解】", script)
         self.assertIn("【沈砚】不能再等了。", script)
+
+    def test_serialize_story_to_script_prefers_appearance_cache_over_legacy_visual_dna(self):
+        story = {
+            "characters": [
+                {
+                    "id": "char_shen_yan",
+                    "name": "Shen Yan",
+                    "role": "lead",
+                    "description": "young man, short black hair, slim build.",
+                }
+            ],
+            "character_images": {
+                "char_shen_yan": {
+                    "visual_dna": "young man, brown cloak",
+                    "character_id": "char_shen_yan",
+                    "character_name": "Shen Yan",
+                }
+            },
+            "meta": {
+                "character_appearance_cache": {
+                    "char_shen_yan": {
+                        "body": "young man, short black hair, slim build",
+                        "clothing": "dark robe",
+                    }
+                }
+            },
+            "scenes": [
+                {
+                    "episode": 1,
+                    "title": "Rainy Night",
+                    "scenes": [
+                        {
+                            "scene_number": 1,
+                            "environment": "corridor",
+                            "visual": "Shen Yan walks through the corridor.",
+                            "audio": [],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        script = serialize_story_to_script(story)
+
+        self.assertIn("Visual DNA: young man, short black hair, slim build; dark robe", script)
+        self.assertNotIn("brown cloak", script)
 
     def test_serialize_story_to_script_filters_to_selected_scenes(self):
         story = {

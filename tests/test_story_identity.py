@@ -1,5 +1,6 @@
 import unittest
 
+from app.core.consistency_cache import APPEARANCE_CACHE_SCHEMA_VERSION, SCENE_STYLE_CACHE_SCHEMA_VERSION
 from app.core.story_identity import normalize_story_record
 
 
@@ -99,6 +100,35 @@ class StoryIdentityTests(unittest.TestCase):
         self.assertEqual(scene_style["source_provider"], "openai")
         self.assertEqual(scene_style["source_model"], "gpt-4o-mini")
         self.assertEqual(scene_style["updated_at"], "2026-03-31T12:00:00+00:00")
+
+    def test_normalize_story_record_preserves_future_cache_schema_versions_for_refresh(self):
+        normalized = normalize_story_record(
+            {
+                "meta": {
+                    "character_appearance_cache": {
+                        "char_li_ming": {
+                            "body": "young man",
+                            "schema_version": str(APPEARANCE_CACHE_SCHEMA_VERSION + 1),
+                        },
+                    },
+                    "scene_style_cache": [
+                        {
+                            "image_extra": "jiangnan teahouse",
+                            "schema_version": str(SCENE_STYLE_CACHE_SCHEMA_VERSION + 1),
+                        }
+                    ],
+                }
+            }
+        )
+
+        self.assertEqual(
+            normalized["meta"]["character_appearance_cache"]["char_li_ming"]["schema_version"],
+            APPEARANCE_CACHE_SCHEMA_VERSION + 1,
+        )
+        self.assertEqual(
+            normalized["meta"]["scene_style_cache"][0]["schema_version"],
+            SCENE_STYLE_CACHE_SCHEMA_VERSION + 1,
+        )
 
     def test_normalize_story_record_strips_micro_action_noise_from_character_description(self):
         normalized = normalize_story_record(

@@ -142,7 +142,8 @@ watch(
     }
 
     currentEpisodeIndex.value = Math.min(currentEpisodeIndex.value, nextLength - 1)
-  }
+  },
+  { immediate: true }
 )
 
 function isAuthError(msg) {

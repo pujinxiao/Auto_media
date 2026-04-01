@@ -70,6 +70,7 @@
                     type="button"
                     class="episode-key-art-group-tab"
                     :class="{ active: getActiveEpisodeReferenceGroupKey(ep.episode) === getEpisodeReferenceGroupKey(group, index) }"
+                    :aria-pressed="getActiveEpisodeReferenceGroupKey(ep.episode) === getEpisodeReferenceGroupKey(group, index)"
                     @click.stop="setActiveEpisodeReferenceGroup(ep.episode, group, index)"
                   >
                     {{ group.group_label || `环境组 ${index + 1}` }}

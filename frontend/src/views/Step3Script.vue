@@ -127,7 +127,7 @@ const hasValidScript = computed(() => hasCompleteGeneratedScript({
   scenes: store.scenes,
 }))
 const done = computed(() => store.step3Done && hasValidScript.value)
-const canGenerate = computed(() => !streaming.value && !hasValidScript.value)
+const canGenerate = computed(() => !streaming.value)
 const generateButtonLabel = computed(() => (hasSceneOutput.value ? '重新生成剧本 ✨' : '开始生成剧本 ✨'))
 const showIncompleteScriptTip = computed(() => (
   !streaming.value
@@ -225,6 +225,7 @@ async function startGenerate() {
   const controller = new AbortController()
   scriptAbortController = controller
   const previousScriptSnapshot = captureScriptSnapshot()
+  const isOverwritingValidScript = previousScriptSnapshot.hasValidScript
   streaming.value = true
   error.value = ''
   currentEpisodeIndex.value = 0
@@ -244,7 +245,7 @@ async function startGenerate() {
           outline: store.outline,
           scenes: store.scenes,
         })
-        const suffix = previousScriptSnapshot?.hasValidScript ? '，已回滚到上一次有效结果' : ''
+        const suffix = isOverwritingValidScript ? '，已回滚到上一次有效结果' : ''
         const message = incompleteEpisodes.length > 0
           ? `剧本生成不完整：${formatEpisodeList(incompleteEpisodes)} 未生成有效场景${suffix}`
           : `剧本生成失败：当前故事缺少大纲或返回结果结构无效，请重试${suffix}`
@@ -261,7 +262,7 @@ async function startGenerate() {
       const normalizedMessage = msg || '生成失败，请重试'
       rollbackScriptGeneration(
         previousScriptSnapshot,
-        previousScriptSnapshot?.hasValidScript
+        isOverwritingValidScript
           ? `${normalizedMessage}，已回滚到上一次有效结果`
           : normalizedMessage
       )

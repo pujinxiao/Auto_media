@@ -33,17 +33,17 @@
       </div>
 
       <button
-        v-if="!started"
+        v-if="canGenerate"
         class="generate-btn"
         :disabled="!store.meta"
         @click="startGenerate"
       >
-        开始生成剧本 ✨
+        {{ generateButtonLabel }}
       </button>
 
-      <div v-if="error && !started" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
+      <div v-if="error && !streaming && !hasSceneOutput" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
 
-      <div v-if="started" class="script-section">
+      <div v-if="streaming || hasSceneOutput" class="script-section">
         <h2>剧本</h2>
         <div v-if="episodeCount" class="episode-slider">
           <button
@@ -67,6 +67,14 @@
         </div>
         <SceneStream :scenes="currentEpisodeScenes" :streaming="streaming" />
         <div v-if="error" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
+        <div
+          v-else-if="showIncompleteScriptTip"
+          class="error-tip"
+          role="alert"
+          aria-live="assertive"
+        >
+          当前剧本不完整，请重新生成。
+        </div>
       </div>
 
       <div v-if="done" class="btn-row">
@@ -113,11 +121,20 @@ const keyModalType = ref('missing')
 const keyModalMsg = ref('')
 const currentEpisodeIndex = ref(0)
 const userPinnedEpisode = ref(false)
-const done = computed(() => store.step3Done && hasCompleteGeneratedScript({
+const hasSceneOutput = computed(() => store.scenes.length > 0)
+const hasValidScript = computed(() => hasCompleteGeneratedScript({
   outline: store.outline,
   scenes: store.scenes,
 }))
-const started = computed(() => streaming.value || done.value || store.scenes.length > 0)
+const done = computed(() => store.step3Done && hasValidScript.value)
+const canGenerate = computed(() => !streaming.value && !hasValidScript.value)
+const generateButtonLabel = computed(() => (hasSceneOutput.value ? '重新生成剧本 ✨' : '开始生成剧本 ✨'))
+const showIncompleteScriptTip = computed(() => (
+  !streaming.value
+  && hasSceneOutput.value
+  && !hasValidScript.value
+  && !error.value
+))
 const episodeCount = computed(() => store.scenes.length)
 const currentEpisode = computed(() => store.scenes[currentEpisodeIndex.value] || null)
 const currentEpisodeScenes = computed(() => (currentEpisode.value ? [currentEpisode.value] : []))

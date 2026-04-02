@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS = 5000
+DEFAULT_OUTLINE_GENERATION_CONCURRENCY = 2
+MAX_OUTLINE_GENERATION_CONCURRENCY = 3
 
 
 class Settings(BaseSettings):
@@ -16,6 +18,7 @@ class Settings(BaseSettings):
     #表示是否开启 LLM 调用遥测/监控功能，默认为 True。开启后会记录 LLM 调用的性能数据（如响应时间、错误率等），以便进行分析和优化。关闭后则不收集这些数据，适合开发环境或对性能监控要求不高的场景。
     llm_telemetry_enabled: bool = True
     llm_slow_log_threshold_ms: int = DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS
+    outline_generation_concurrency: int = DEFAULT_OUTLINE_GENERATION_CONCURRENCY
 
     # LLM
     default_llm_provider: str = "claude"
@@ -111,6 +114,28 @@ class Settings(BaseSettings):
             return DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS
 
         return threshold
+
+    @field_validator("outline_generation_concurrency", mode="before")
+    @classmethod
+    def _normalize_outline_generation_concurrency(cls, value):
+        try:
+            concurrency = int(value)
+        except (TypeError, ValueError) as exc:
+            logger.error("Invalid outline generation concurrency value=%r; expected an integer", value)
+            raise ValueError("outline_generation_concurrency must be an integer between 1 and 3") from exc
+
+        if concurrency < 1:
+            logger.warning("Invalid outline_generation_concurrency=%s; falling back to 1", concurrency)
+            return 1
+        if concurrency > MAX_OUTLINE_GENERATION_CONCURRENCY:
+            logger.warning(
+                "outline_generation_concurrency=%s exceeds max=%s; falling back to max",
+                concurrency,
+                MAX_OUTLINE_GENERATION_CONCURRENCY,
+            )
+            return MAX_OUTLINE_GENERATION_CONCURRENCY
+
+        return concurrency
 
     class Config:
         env_file = ".env"

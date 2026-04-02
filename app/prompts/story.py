@@ -136,6 +136,88 @@ OUTLINE_PROMPT = """你是一位资深短剧编剧，擅长快节奏、高冲突
 只返回JSON，不要其他内容。"""
 
 
+OUTLINE_BLUEPRINT_PROMPT = """你是一位资深短剧编剧，擅长快节奏、高冲突、钩子密集的短剧策划。最终剧本将用于 AI 视频生成，请优先考虑视觉冲击力强、场景具象的设定。
+
+故事设定：{selected_setting}
+
+当前任务是先生成“全局蓝图（blueprint）”，用于后续分批并发扩写剧情大纲。
+这一步只负责统一世界观、人物、关系、全季推进骨架和地点命名，不直接展开每一集的完整 beats 与 scene_list。
+
+硬性要求：
+1. `meta.episodes` 固定为 6
+2. `season_plan.episode_arcs` 必须完整包含第 1 集到第 6 集，且 `episode` 严格按 1, 2, 3, 4, 5, 6 连续返回
+3. `episode_arcs[].arc` 每集只写一句主推进，强调因果、升级和收束
+4. `location_glossary` 只列出后续大纲里应尽量复用的稳定地点命名
+5. `tone_rules` 只写 2-4 条最重要的风格约束，便于后续批次复用
+6. 角色描述延续大纲层要求：先写视觉锚点，再写身份处境、核心性格、行为方式；禁止微观操作细节、机关触发步骤、镜头调度
+
+请以 JSON 返回，结构如下：
+{{
+  "meta": {{
+    "title": "故事标题",
+    "genre": "类型",
+    "episodes": 6,
+    "theme": "主题",
+    "logline": "一句话核心冲突",
+    "visual_tone": "一句话视觉风格基调"
+  }},
+  "characters": [
+    {{"name": "角色名", "role": "主角/配角", "description": "角色描述"}}
+  ],
+  "relationships": [
+    {{"source": "角色A", "target": "角色B", "label": "关系描述"}}
+  ],
+  "season_plan": {{
+    "episode_arcs": [
+      {{"episode": 1, "arc": "本集主推进一句话"}}
+    ],
+    "location_glossary": ["稳定地点命名1", "稳定地点命名2"],
+    "tone_rules": ["风格约束1", "风格约束2"]
+  }}
+}}
+
+注意：
+1. `episode_arcs` 只是全季骨架，不要提前展开成完整 `summary`、`beats`、`scene_list`
+2. 仍然要保证第 1 集建立人物与主冲突，第 2-5 集持续升级，第 6 集完成核心收束
+3. 只返回 JSON，不要其他内容。"""
+
+
+OUTLINE_BATCH_PROMPT = """你是一位资深短剧编剧，正在根据既定的全局蓝图扩写部分集数的大纲。最终剧本将用于 AI 视频生成，请优先考虑视觉冲击力强、场景具象的设定。
+
+全局蓝图：
+{blueprint_json}
+
+本次只允许生成这些集数：{target_episodes}
+
+当前任务属于第一层：剧情大纲（Logic Layer）。
+请只展开上述指定集数，返回这些集数的完整 `outline` 条目，不要返回 `meta`、`characters`、`relationships`，也不要返回未指定的集数。
+
+硬性要求：
+1. 返回结果必须是 JSON 对象，且只包含 `outline`
+2. `outline` 中的 `episode` 必须与目标集数完全一致，禁止缺失、重复、乱序、越界
+3. 每一集都必须包含完整字段：`episode`、`title`、`summary`、`beats`、`scene_list`
+4. `summary` 只写剧情逻辑，不写对白，不写镜头语言，不写摄影机运动
+5. `beats` 只写本集关键转折点，每条一句
+6. `scene_list` 只做场景切分与场景任务说明，强调 [时间] [内/外] [地点] 和当场发生的核心事件
+7. 相同地点必须优先复用 `season_plan.location_glossary` 中已经确定的命名
+8. 剧情推进必须服从 `season_plan.episode_arcs` 给出的全季骨架，不得擅自改写主线方向
+
+请以 JSON 返回，结构如下：
+{{
+  "outline": [
+    {{
+      "episode": 1,
+      "title": "集标题",
+      "summary": "本集逻辑推进摘要：只写因果、冲突、转折、结果",
+      "beats": ["Beat 1", "Beat 2", "Beat 3"],
+      "scene_list": ["Scene 1: [夜] [室外] [天台] - 主角发现信封，内心动摇。"]
+    }}
+  ]
+}}
+
+只返回 JSON，不要其他内容。"""
+
+
 # ============================================================================
 # Step 3: 导演分镜剧本
 # ============================================================================

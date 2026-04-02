@@ -1,7 +1,11 @@
 import unittest
 from unittest.mock import patch
 
-from app.core.config import DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS, Settings
+from app.core.config import (
+    DEFAULT_LLM_SLOW_LOG_THRESHOLD_MS,
+    MAX_OUTLINE_GENERATION_CONCURRENCY,
+    Settings,
+)
 
 
 class SettingsValidationTests(unittest.TestCase):
@@ -16,6 +20,14 @@ class SettingsValidationTests(unittest.TestCase):
     def test_zero_llm_slow_log_threshold_is_allowed(self):
         settings = Settings(_env_file=None, llm_slow_log_threshold_ms=0)
         self.assertEqual(settings.llm_slow_log_threshold_ms, 0)
+
+    def test_outline_generation_concurrency_is_clamped_to_supported_max(self):
+        with patch("app.core.config.logger.warning") as warning_mock:
+            settings = Settings(_env_file=None, outline_generation_concurrency=9)
+
+        self.assertEqual(settings.outline_generation_concurrency, MAX_OUTLINE_GENERATION_CONCURRENCY)
+        warning_mock.assert_called_once()
+        self.assertIn("exceeds max", warning_mock.call_args.args[0])
 
 
 if __name__ == "__main__":

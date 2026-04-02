@@ -209,35 +209,93 @@ class StoryLlmTelemetryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         tracker.record_failure.assert_called_once()
 
     async def test_generate_outline_records_failure_when_outline_validation_fails(self):
-        async def fake_stream():
-            yield SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        delta=SimpleNamespace(
-                            content='{"meta":{"episodes":6},"outline":[{"episode":1,"title":"第一集","summary":"摘要","beats":["Beat 1"],"scene_list":["Scene 1"]}]}'
+        blueprint_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"meta":{"title":"标题","genre":"类型","episodes":6,"theme":"主题","logline":"一句话冲突","visual_tone":"冷峻"},'
+                            '"characters":[{"name":"主角","role":"主角","description":"黑发，外冷内烈。"}],'
+                            '"relationships":[{"source":"主角","target":"反派","label":"宿敌"}],'
+                            '"season_plan":{"episode_arcs":['
+                            '{"episode":1,"arc":"建立主冲突"},'
+                            '{"episode":2,"arc":"矛盾升级"},'
+                            '{"episode":3,"arc":"局势失控"},'
+                            '{"episode":4,"arc":"真相逼近"},'
+                            '{"episode":5,"arc":"决战前夜"},'
+                            '{"episode":6,"arc":"完成收束"}'
+                            '],"location_glossary":["天台"],"tone_rules":["强冲突"]}}'
                         )
                     )
-                ]
-            )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+        )
+        invalid_batch_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content='{"outline":[{"episode":1,"title":"第一集","summary":"摘要","beats":["Beat 1"],"scene_list":["Scene 1"]}]}'
+                    )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=9, completion_tokens=4),
+        )
+        valid_batch_response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"outline":['
+                            '{"episode":4,"title":"第四集","summary":"摘要4","beats":["Beat 4"],"scene_list":["Scene 4"]},'
+                            '{"episode":5,"title":"第五集","summary":"摘要5","beats":["Beat 5"],"scene_list":["Scene 5"]},'
+                            '{"episode":6,"title":"第六集","summary":"摘要6","beats":["Beat 6"],"scene_list":["Scene 6"]}'
+                            ']}'
+                        )
+                    )
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=9, completion_tokens=4),
+        )
+
+        async def fake_create(*, model, messages):
+            prompt = messages[0]["content"]
+            if "全局蓝图（blueprint）" in prompt:
+                return blueprint_response
+            if "本次只允许生成这些集数：1, 2, 3" in prompt:
+                return invalid_batch_response
+            if "本次只允许生成这些集数：4, 5, 6" in prompt:
+                return valid_batch_response
+            raise AssertionError(f"Unexpected prompt: {prompt}")
 
         fake_client = SimpleNamespace(
             chat=SimpleNamespace(
-                completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream()))
+                completions=SimpleNamespace(create=AsyncMock(side_effect=fake_create))
             )
         )
-        tracker = SimpleNamespace(record_failure=Mock(), record_success=Mock(), mark_first_token=Mock())
+        trackers = []
+
+        def build_tracker(*args, **kwargs):
+            tracker = SimpleNamespace(record_failure=Mock(), record_success=Mock(), mark_first_token=Mock())
+            trackers.append((kwargs["operation"], tracker))
+            return tracker
 
         with patch("app.services.story_llm._make_client", return_value=fake_client):
-            with patch("app.services.story_llm._build_llm_tracker", return_value=tracker):
-                with self.assertRaises(HTTPException):
-                    await generate_outline(
-                        "story-invalid-outline",
-                        selected_setting="新的世界观设定",
-                        db=object(),
-                        api_key="fake-key",
-                        provider="qwen",
-                        model="qwen-max",
-                    )
+            with patch("app.services.story_llm.settings.outline_generation_concurrency", 2):
+                with patch("app.services.story_llm._build_llm_tracker", side_effect=build_tracker):
+                    with self.assertRaises(HTTPException):
+                        await generate_outline(
+                            "story-invalid-outline",
+                            selected_setting="新的世界观设定",
+                            db=object(),
+                            api_key="fake-key",
+                            provider="qwen",
+                            model="qwen-max",
+                        )
 
-        tracker.record_success.assert_not_called()
-        tracker.record_failure.assert_called_once()
+        self.assertTrue(any(operation == "story.generate_outline.blueprint" for operation, _ in trackers))
+        self.assertTrue(any(operation == "story.generate_outline.batch" for operation, _ in trackers))
+        self.assertEqual(
+            sum(1 for _, tracker in trackers if tracker.record_failure.called),
+            1,
+        )

@@ -205,6 +205,203 @@ def _ensure_world_building_question_options(question: Any):
     return {**question, "options": options[:3]}
 
 
+def _normalize_world_building_question(question: Any) -> dict[str, Any] | None:
+    normalized_question = _ensure_world_building_question_options(question)
+    if not isinstance(normalized_question, dict):
+        return None
+
+    question_type = str(normalized_question.get("type") or "options").strip() or "options"
+    question_text = str(normalized_question.get("text") or "").strip()
+    dimension = str(normalized_question.get("dimension") or "").strip()
+    options = _coerce_world_building_options(normalized_question.get("options"))
+
+    if not question_text:
+        return None
+
+    payload: dict[str, Any] = {
+        "type": question_type,
+        "text": question_text,
+    }
+    if options:
+        payload["options"] = options[:3]
+    if dimension:
+        payload["dimension"] = dimension
+    return payload
+
+
+def _world_building_history_question_entry(question: dict[str, Any]) -> dict[str, Any]:
+    entry = {
+        "role": "ai",
+        "text": question.get("text", ""),
+        "type": question.get("type", "options"),
+    }
+    if question.get("options"):
+        entry["options"] = list(question.get("options") or [])
+    if question.get("dimension"):
+        entry["dimension"] = question.get("dimension")
+    return entry
+
+
+def _normalize_frontend_world_building_history(raw_history: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_history, list):
+        return []
+
+    normalized_history: list[dict[str, Any]] = []
+    for entry in raw_history:
+        if not isinstance(entry, dict):
+            continue
+        role = str(entry.get("role") or "").strip()
+        if role == "user":
+            text = str(entry.get("text") or entry.get("content") or "").strip()
+            # Legacy wb_history stored the initial seed prompt as a raw user message; the UI does not need it.
+            if text and not text.startswith("种子想法："):
+                normalized_history.append({"role": "user", "text": text})
+            continue
+
+        if role in {"ai", "assistant"}:
+            question = _normalize_world_building_question(
+                {
+                    "type": entry.get("type"),
+                    "text": entry.get("text"),
+                    "options": entry.get("options"),
+                    "dimension": entry.get("dimension"),
+                }
+            )
+            if question is None:
+                content = str(entry.get("content") or "").strip()
+                if not content:
+                    continue
+                try:
+                    parsed = _parse_json(content)
+                except Exception:
+                    continue
+                question = _normalize_world_building_question(parsed.get("question"))
+            if question is not None:
+                normalized_history.append(_world_building_history_question_entry(question))
+
+    return normalized_history
+
+
+def _normalize_world_building_answered_items(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+
+    answered_items: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question") or "").strip()
+        answer = str(entry.get("answer") or "").strip()
+        dimension = str(entry.get("dimension") or "").strip()
+        if not question or not answer:
+            continue
+        answered_item = {
+            "question": question,
+            "answer": answer,
+        }
+        if dimension:
+            answered_item["dimension"] = dimension
+        answered_items.append(answered_item)
+    return answered_items
+
+
+def _build_world_building_state_from_history(
+    *,
+    idea: str,
+    frontend_history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    answered: list[dict[str, str]] = []
+    pending_question: dict[str, Any] | None = None
+
+    for entry in frontend_history:
+        role = str(entry.get("role") or "").strip()
+        if role == "ai":
+            pending_question = _normalize_world_building_question(entry)
+            continue
+
+        if role == "user" and pending_question is not None:
+            answer = str(entry.get("text") or "").strip()
+            if answer:
+                answered_item = {
+                    "question": pending_question.get("text", ""),
+                    "answer": answer,
+                }
+                dimension = str(pending_question.get("dimension") or "").strip()
+                if dimension:
+                    answered_item["dimension"] = dimension
+                answered.append(answered_item)
+            pending_question = None
+
+    return {
+        "idea": str(idea or "").strip(),
+        "answered": answered,
+        "current_question": pending_question,
+    }
+
+
+def _load_world_building_state(story: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    idea = str(story.get("idea") or "").strip()
+    frontend_history = _normalize_frontend_world_building_history(story.get("wb_history"))
+    derived_state = _build_world_building_state_from_history(idea=idea, frontend_history=frontend_history)
+
+    meta = story.get("meta") or {}
+    raw_state = meta.get("wb_state") if isinstance(meta, dict) else None
+    if not isinstance(raw_state, dict):
+        return frontend_history, derived_state
+
+    current_question = _normalize_world_building_question(raw_state.get("current_question"))
+    answered = _normalize_world_building_answered_items(raw_state.get("answered"))
+    state = {
+        "idea": str(raw_state.get("idea") or idea).strip(),
+        "answered": answered or derived_state.get("answered", []),
+        "current_question": current_question if current_question is not None else derived_state.get("current_question"),
+    }
+    return frontend_history, state
+
+
+def _build_world_building_turn_messages(
+    *,
+    state: dict[str, Any],
+    answer: str,
+    turn: int,
+) -> list[dict[str, str]]:
+    current_question = _normalize_world_building_question(state.get("current_question"))
+    if current_question is None:
+        raise ValueError("当前缺少待回答的世界观问题")
+
+    answered_items = _normalize_world_building_answered_items(state.get("answered"))
+    answered_lines = []
+    for item in answered_items:
+        dimension = str(item.get("dimension") or "").strip()
+        question = item.get("question", "")
+        answer_text = item.get("answer", "")
+        if dimension:
+            answered_lines.append(f"- {dimension}：{answer_text}")
+        else:
+            answered_lines.append(f"- {question}：{answer_text}")
+    answered_block = "\n".join(answered_lines) if answered_lines else "无，当前为第 1 轮。"
+
+    option_lines = "\n".join(f"- {option}" for option in list(current_question.get("options") or [])) or "- 无选项信息"
+    dimension = str(current_question.get("dimension") or "").strip() or "未指定维度"
+    prompt = (
+        f"种子想法：{state.get('idea', '')}\n"
+        f"已确认设定：\n{answered_block}\n\n"
+        f"当前问题（第 {turn} / 6 轮）：\n"
+        f"- 维度：{dimension}\n"
+        f"- 问题：{current_question.get('text', '')}\n"
+        f"- 可选项：\n{option_lines}\n\n"
+        f"用户本轮回答：{str(answer or '').strip()}\n\n"
+        "请结合以上已确认设定继续推进世界观构建：\n"
+        "1. 如果尚未问满 6 轮，返回 status=questioning，并给出下一题\n"
+        "2. 如果已经问满 6 轮，返回 status=complete，并给出完整 world_summary\n"
+        "3. 只返回 JSON，不要其他内容。"
+    )
+    return [
+        {"role": "system", "content": WB_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+
 def _merge_characters(existing_characters: list[dict], incoming_characters: list[dict]) -> list[dict]:
     for character in incoming_characters:
         char_id = str(character.get("id", "")).strip()

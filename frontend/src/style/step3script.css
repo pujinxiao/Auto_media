@@ -6,8 +6,17 @@ h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
 .top-row { display: flex; gap: 16px; align-items: flex-start; }
 .outline-col { flex: 1; min-width: 0; }
 .graph-col { width: 380px; flex-shrink: 0; position: sticky; top: 24px; }
-.generate-btn {
+.generate-btn-wrapper {
   margin-top: 24px;
+}
+
+.generate-action-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.generate-btn {
   width: 100%;
   padding: 16px;
   background: linear-gradient(135deg, #6c63ff, #a78bfa);
@@ -19,6 +28,33 @@ h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
 }
 .generate-btn:hover:not(:disabled) { opacity: 0.9; }
 .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.generate-btn-secondary {
+  margin-top: 0;
+  flex: 1;
+  width: auto;
+}
+
+.continue-btn {
+  flex: 1;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px dashed #c9c1ef;
+  background: linear-gradient(135deg, #f7f5ff, #ffffff);
+  color: #7d74a7;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.resume-hint {
+  margin-top: 10px;
+  color: #6f6896;
+  font-size: 13px;
+  text-align: center;
+}
+
 .script-section { margin-top: 28px; }
 .script-section h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
 .episode-slider {
@@ -98,6 +134,10 @@ h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
   .graph-col {
     width: 100%;
     position: static;
+  }
+
+  .generate-action-row {
+    flex-direction: column;
   }
 
   .episode-slider {

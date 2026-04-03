@@ -32,14 +32,45 @@
         </div>
       </div>
 
-      <button
-        v-if="canGenerate"
-        class="generate-btn"
-        :disabled="!store.meta"
-        @click="startGenerate"
+      <div v-if="showResumeActionRow" class="generate-action-row">
+        <button
+          class="continue-btn"
+          type="button"
+          disabled
+          :title="resumeButtonHint"
+        >
+          {{ continueButtonLabel }}
+        </button>
+        <button
+          class="generate-btn generate-btn-secondary"
+          :disabled="!store.meta"
+          @click="startGenerate"
+        >
+          重新生成全部 ✨
+        </button>
+      </div>
+
+      <div
+        v-else-if="canGenerate"
+        class="generate-btn-wrapper"
       >
-        {{ generateButtonLabel }}
-      </button>
+        <button
+          class="generate-btn"
+          :disabled="!store.meta"
+          @click="startGenerate"
+        >
+          {{ generateButtonLabel }}
+        </button>
+      </div>
+
+      <div
+        v-if="showResumeActionRow"
+        class="resume-hint"
+        role="status"
+        aria-live="polite"
+      >
+        {{ resumeButtonHint }}
+      </div>
 
       <div v-if="error && !streaming && !hasSceneOutput" class="error-tip" role="alert" aria-live="assertive">{{ error }}</div>
 
@@ -126,9 +157,30 @@ const hasValidScript = computed(() => hasCompleteGeneratedScript({
   outline: store.outline,
   scenes: store.scenes,
 }))
+const incompleteEpisodes = computed(() => getIncompleteScriptEpisodes({
+  outline: store.outline,
+  scenes: store.scenes,
+}))
+const nextIncompleteEpisode = computed(() => incompleteEpisodes.value[0] ?? null)
 const done = computed(() => store.step3Done && hasValidScript.value)
 const canGenerate = computed(() => !streaming.value)
 const generateButtonLabel = computed(() => (hasSceneOutput.value ? '重新生成剧本 ✨' : '开始生成剧本 ✨'))
+const showResumeActionRow = computed(() => (
+  canGenerate.value
+  && hasSceneOutput.value
+  && !hasValidScript.value
+  && nextIncompleteEpisode.value != null
+))
+const continueButtonLabel = computed(() => (
+  nextIncompleteEpisode.value != null
+    ? `继续生成（第 ${nextIncompleteEpisode.value} 集起）`
+    : '继续生成'
+))
+const resumeButtonHint = computed(() => (
+  nextIncompleteEpisode.value != null
+    ? `续生成功能 UI 已预留，待后端接口接入后，将从第 ${nextIncompleteEpisode.value} 集继续生成。`
+    : '续生成功能 UI 已预留，待后端接口接入后即可使用。'
+))
 const showIncompleteScriptTip = computed(() => (
   !streaming.value
   && hasSceneOutput.value

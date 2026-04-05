@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -1574,6 +1575,96 @@ class StoryContextPreparationTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("character_appearance_cache", story["meta"])
             self.assertIn("scene_style_cache", story["meta"])
+
+    async def test_prepare_story_context_runs_cache_extractors_concurrently(self):
+        async with self.session_factory() as session:
+            await repo.save_story(
+                session,
+                "story-ctx-concurrent-refresh",
+                {
+                    "idea": "test",
+                    "genre": "历史",
+                    "tone": "沉稳",
+                    "selected_setting": "江南古镇，石桥，细雨。",
+                    "characters": [
+                        {
+                            "id": "char_li_ming",
+                            "name": "李明",
+                            "role": "主角",
+                            "description": "25岁青年男子，黑色短发，穿着深蓝长衫。",
+                        }
+                    ],
+                    "meta": {},
+                },
+            )
+
+            appearance_started = asyncio.Event()
+            style_started = asyncio.Event()
+            release_both = asyncio.Event()
+            call_order: list[str] = []
+
+            async def _fake_extract_character_appearance(*args, **kwargs):
+                call_order.append("appearance_start")
+                appearance_started.set()
+                await style_started.wait()
+                await release_both.wait()
+                return {
+                    "char_li_ming": {
+                        "body": "young man, short black hair",
+                        "clothing": "dark blue robe",
+                    }
+                }
+
+            async def _fake_extract_scene_style_cache(*args, **kwargs):
+                call_order.append("scene_style_start")
+                style_started.set()
+                await appearance_started.wait()
+                await release_both.wait()
+                return [
+                    {
+                        "keywords": ["bridge"],
+                        "image_extra": "ancient bridge, rain mist",
+                        "video_extra": "ancient bridge, rain mist",
+                    }
+                ]
+
+            with (
+                patch(
+                    "app.services.story_context_service.extract_character_appearance",
+                    new=_fake_extract_character_appearance,
+                ),
+                patch(
+                    "app.services.story_context_service.extract_scene_style_cache",
+                    new=_fake_extract_scene_style_cache,
+                ),
+            ):
+                task = asyncio.create_task(
+                    prepare_story_context(
+                        session,
+                        "story-ctx-concurrent-refresh",
+                        provider="openai",
+                        model="gpt-4o-mini",
+                        api_key="test-key",
+                        base_url="https://example.com/v1",
+                    )
+                )
+                await asyncio.wait_for(appearance_started.wait(), timeout=1)
+                await asyncio.wait_for(style_started.wait(), timeout=1)
+                self.assertCountEqual(call_order, ["appearance_start", "scene_style_start"])
+                self.assertFalse(task.done())
+
+                release_both.set()
+                story, ctx = await asyncio.wait_for(task, timeout=1)
+
+            self.assertIsNotNone(ctx)
+            self.assertEqual(
+                story["meta"]["character_appearance_cache"]["char_li_ming"]["body"],
+                "young man, short black hair",
+            )
+            self.assertEqual(
+                story["meta"]["scene_style_cache"][0]["image_extra"],
+                "ancient bridge, rain mist",
+            )
 
 
 class StoryContextServiceParsingTests(unittest.TestCase):

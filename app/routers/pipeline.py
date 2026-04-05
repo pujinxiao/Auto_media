@@ -3,6 +3,7 @@ import re
 from ipaddress import ip_address
 from copy import deepcopy
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -763,6 +764,10 @@ async def generate_storyboard(
     db: AsyncSession = Depends(get_db),
 ):
     pipeline_id = str(uuid4())
+    storyboard_started_at = perf_counter()
+    load_context_ms = 0
+    parse_storyboard_ms = 0
+    persistence_ms = 0
 
     script_provider = request.headers.get("X-Script-Provider", "")
     script_api_key = request.headers.get("X-Script-API-Key", "")
@@ -775,6 +780,7 @@ async def generate_storyboard(
         script_llm = llm
 
     provider = script_llm["provider"] or req.provider or "claude"
+    effective_model = script_llm["model"] or req.model or ""
     tracking_story_id = resolve_tracking_story_id(project_id, req.story_id)
 
     await repo.save_pipeline(
@@ -790,14 +796,16 @@ async def generate_storyboard(
 
     try:
         character_info = None
+        load_context_started_at = perf_counter()
         story, story_context = await _load_story_context(
             db,
             tracking_story_id,
             provider=provider,
-            model=script_llm["model"] or req.model or "",
+            model=effective_model,
             api_key=script_llm["api_key"],
             base_url=script_llm["base_url"],
         )
+        load_context_ms = round((perf_counter() - load_context_started_at) * 1000)
         if story:
             characters = story.get("characters", [])
             character_images = story.get("character_images", {})
@@ -808,10 +816,11 @@ async def generate_storyboard(
                     "meta": story.get("meta") or {},
                 }
 
+        parse_storyboard_started_at = perf_counter()
         shots, usage = await parse_script_to_storyboard(
             req.script,
             provider=provider,
-            model=script_llm["model"] or req.model,
+            model=effective_model,
             api_key=script_llm["api_key"],
             base_url=script_llm["base_url"],
             character_info=character_info,
@@ -822,13 +831,28 @@ async def generate_storyboard(
                 "project_id": project_id,
             },
         )
+        parse_storyboard_ms = round((perf_counter() - parse_storyboard_started_at) * 1000)
     except Exception as exc:
         logger.exception(
             "Storyboard generation failed project_id=%s story_id=%s provider=%s model=%s",
             project_id,
             tracking_story_id,
             provider,
-            script_llm["model"] or req.model or "",
+            effective_model,
+        )
+        logger.warning(
+            "STORYBOARD_TIMING success=%s project_id=%s story_id=%s pipeline_id=%s provider=%s model=%s script_chars=%s load_context_ms=%s parse_storyboard_ms=%s persistence_ms=%s total_ms=%s",
+            False,
+            project_id,
+            tracking_story_id,
+            pipeline_id,
+            provider,
+            effective_model or "(default)",
+            len(req.script or ""),
+            load_context_ms,
+            parse_storyboard_ms,
+            persistence_ms,
+            round((perf_counter() - storyboard_started_at) * 1000),
         )
         await repo.save_pipeline(
             db,
@@ -851,6 +875,7 @@ async def generate_storyboard(
         },
     }
 
+    persistence_started_at = perf_counter()
     await repo.save_pipeline(
         db,
         pipeline_id,
@@ -879,6 +904,24 @@ async def generate_storyboard(
             prune_generated_files_to_shots=True,
             clear_final_video=True,
         )
+    persistence_ms = round((perf_counter() - persistence_started_at) * 1000)
+    logger.info(
+        "STORYBOARD_TIMING success=%s project_id=%s story_id=%s pipeline_id=%s provider=%s model=%s script_chars=%s shots=%s prompt_tokens=%s completion_tokens=%s load_context_ms=%s parse_storyboard_ms=%s persistence_ms=%s total_ms=%s",
+        True,
+        project_id,
+        tracking_story_id,
+        pipeline_id,
+        provider,
+        effective_model or "(default)",
+        len(req.script or ""),
+        len(shots),
+        usage.get("prompt_tokens", 0),
+        usage.get("completion_tokens", 0),
+        load_context_ms,
+        parse_storyboard_ms,
+        persistence_ms,
+        round((perf_counter() - storyboard_started_at) * 1000),
+    )
 
     return Storyboard(
         pipeline_id=pipeline_id,

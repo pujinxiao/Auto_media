@@ -953,6 +953,39 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["final_video_url"], "")
         self.assertEqual(state["shots"][0]["shot_id"], "scene1_shot1")
 
+    async def test_generate_storyboard_logs_stage_timings(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        req = StoryboardRequest(script="scene script", provider="openai", model="gpt-test")
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch("app.routers.pipeline._load_story_context", new=AsyncMock(return_value=({}, None))),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(return_value=([self._make_shot()], {"prompt_tokens": 1, "completion_tokens": 1})),
+                    ),
+                    patch("app.routers.pipeline.logger.info") as info_mock,
+                ):
+                    await generate_storyboard(
+                        "story-log-timings",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertTrue(
+            any(call.args and "STORYBOARD_TIMING" in str(call.args[0]) for call in info_mock.call_args_list)
+        )
+
 
 class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):
     def _make_request(self) -> Request:

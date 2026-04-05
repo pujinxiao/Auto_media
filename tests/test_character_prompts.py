@@ -251,6 +251,38 @@ class CharacterPromptTests(unittest.TestCase):
         self.assertIn("李明", section)
         self.assertIn("阿月", section)
 
+    def test_build_character_section_ignores_serialized_character_header_when_filtering(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
+                    {"id": "char_a_yue", "name": "阿月", "role": "配角", "description": "年轻女子，长发。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "阿月",
+                    },
+                },
+            },
+            script=(
+                "# 角色信息\n"
+                "- 李明（主角）：青年男子，黑色短发。\n"
+                "- 阿月（配角）：年轻女子，长发。\n\n"
+                "# 第1集 雨夜来客\n\n"
+                "【画面】阿月站在门口，回头看向屋内。"
+            ),  # noqa: RUF001
+        )
+
+        self.assertNotIn("李明", section)
+        self.assertIn("阿月", section)
+
 
 if __name__ == "__main__":
     unittest.main()

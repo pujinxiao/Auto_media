@@ -928,7 +928,17 @@ def _shot_text_haystack(shot: ShotLike, *, include_last_frame: bool = True) -> s
 
 def _safe_name_match(name: str, haystack: str) -> bool:
     normalized_name = _collapse_spaces(name)
-    normalized_haystack = _collapse_spaces(haystack)
+    haystack_text = str(haystack or "")
+    if haystack_text.lstrip().startswith("# 角色信息"):
+        # Serialized storyboard scripts embed a full character roster ahead of the scene body.
+        # Strip that leading block so name filtering reflects actual scene mentions.
+        haystack_text = re.sub(
+            r"^\s*# 角色信息\b.*?(?=^\s*(?:# 第|## 场景|【)|\Z)",
+            "",
+            haystack_text,
+            flags=re.MULTILINE | re.DOTALL,
+        ).strip()
+    normalized_haystack = _collapse_spaces(haystack_text)
     if not normalized_name or not normalized_haystack:
         return False
 

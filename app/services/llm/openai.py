@@ -1,6 +1,6 @@
 from openai import AsyncOpenAI
-from app.services.llm.base import BaseLLMProvider
-from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars
+from app.services.llm.base import BaseLLMProvider, build_cache_routing_key, estimate_cacheable_prefix_tokens
+from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars, normalize_usage
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -8,6 +8,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1", model: str = "gpt-4o"):
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._base_url = base_url
         self._model = model
 
     async def complete(self, system: str, user: str, temperature: float = 0.3, telemetry_context=None) -> str:
@@ -53,10 +54,7 @@ class OpenAIProvider(BaseLLMProvider):
             tracker.record_failure(exc)
             raise
         usage_obj = getattr(resp, "usage", None)
-        usage = {
-            "prompt_tokens": usage_obj.prompt_tokens if usage_obj else 0,
-            "completion_tokens": usage_obj.completion_tokens if usage_obj else 0,
-        }
+        usage = normalize_usage(usage_obj)
         text = resp.choices[0].message.content
         tracker.record_success(usage=usage, response_text=text)
         return text, usage
@@ -71,13 +69,25 @@ class OpenAIProvider(BaseLLMProvider):
         cache_threshold_tokens: int = 1024,
         telemetry_context=None,
     ) -> tuple[str, dict]:
-        del enable_caching, cache_key, cache_threshold_tokens
         request_messages = [
             {"role": message.get("role", "user"), "content": message.get("content", "")}
             for message in messages
         ]
         if system:
             request_messages = [{"role": "system", "content": system}, *request_messages]
+        stable_token_budget = estimate_cacheable_prefix_tokens(system=system, messages=messages)
+        use_caching = enable_caching and stable_token_budget >= cache_threshold_tokens
+        extra_body = None
+        if use_caching and "api.openai.com" in str(self._base_url or ""):
+            prompt_cache_key = build_cache_routing_key(
+                provider=self.provider_name,
+                model=self._model,
+                system=system,
+                messages=messages,
+                cache_key=cache_key,
+            )
+            if prompt_cache_key:
+                extra_body = {"prompt_cache_key": prompt_cache_key}
         tracker = LLMCallTracker(
             provider=self.provider_name,
             model=self._model,
@@ -89,15 +99,15 @@ class OpenAIProvider(BaseLLMProvider):
                 model=self._model,
                 temperature=temperature,
                 messages=request_messages,
+                extra_body=extra_body,
             )
         except Exception as exc:
-            tracker.record_failure(exc)
+            tracker.record_failure(exc, extra={"cache_enabled": use_caching})
             raise
         usage_obj = getattr(resp, "usage", None)
-        usage = {
-            "prompt_tokens": usage_obj.prompt_tokens if usage_obj else 0,
-            "completion_tokens": usage_obj.completion_tokens if usage_obj else 0,
-        }
+        usage = normalize_usage(usage_obj)
+        if use_caching:
+            usage["cache_enabled"] = True
         text = resp.choices[0].message.content
         tracker.record_success(usage=usage, response_text=text)
         return text, usage

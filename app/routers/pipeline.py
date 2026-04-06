@@ -1,5 +1,6 @@
 import logging
 import re
+from collections.abc import Mapping
 from ipaddress import ip_address
 from copy import deepcopy
 from pathlib import Path
@@ -86,6 +87,43 @@ def _normalize_optional_id(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _build_storyboard_usage(usage: Mapping[str, object] | None) -> dict[str, object]:
+    usage_map = dict(usage or {})
+    prompt_tokens = max(0, int(usage_map.get("prompt_tokens", 0) or 0))
+    completion_tokens = max(0, int(usage_map.get("completion_tokens", 0) or 0))
+    storyboard_usage: dict[str, object] = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+    }
+
+    cache_enabled = usage_map.get("cache_enabled")
+    if cache_enabled is not None:
+        storyboard_usage["cache_enabled"] = bool(cache_enabled)
+
+    cache_read_input_tokens = usage_map.get("cache_read_input_tokens")
+    if cache_read_input_tokens is not None:
+        storyboard_usage["cache_read_input_tokens"] = max(0, int(cache_read_input_tokens or 0))
+
+    cache_creation_input_tokens = usage_map.get("cache_creation_input_tokens")
+    if cache_creation_input_tokens is not None:
+        storyboard_usage["cache_creation_input_tokens"] = max(0, int(cache_creation_input_tokens or 0))
+
+    cached_tokens_present = (
+        "cached_tokens" in usage_map
+        or "cache_read_input_tokens" in usage_map
+        or cache_enabled is not None
+    )
+    cached_tokens = usage_map.get("cached_tokens", usage_map.get("cache_read_input_tokens", 0))
+    cached_tokens_value = max(0, int(cached_tokens or 0))
+    if cached_tokens_present:
+        storyboard_usage["cached_tokens"] = cached_tokens_value
+        if prompt_tokens > 0:
+            storyboard_usage["uncached_prompt_tokens"] = max(prompt_tokens - cached_tokens_value, 0)
+            storyboard_usage["cache_hit_ratio"] = round(cached_tokens_value / prompt_tokens, 4)
+
+    return storyboard_usage
 
 
 def _extract_storyboard_shots_from_generated_files(generated_files: dict | None) -> list[dict]:
@@ -864,13 +902,11 @@ async def generate_storyboard(
         )
         raise HTTPException(status_code=500, detail=f"Storyboard generation failed: {exc}") from exc
 
+    storyboard_usage = _build_storyboard_usage(usage)
     storyboard_generated_files = {
         "storyboard": {
             "shots": [_serialize_shot(shot) for shot in shots],
-            "usage": {
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0),
-            },
+            "usage": storyboard_usage,
         },
     }
 
@@ -892,10 +928,7 @@ async def generate_storyboard(
             tracking_story_id=tracking_story_id,
             story=story,
             shots=shots,
-            usage={
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0),
-            },
+            usage=storyboard_usage,
             generated_files=storyboard_generated_files,
             pipeline_id=pipeline_id,
             project_id=project_id,
@@ -905,7 +938,7 @@ async def generate_storyboard(
         )
     persistence_ms = round((perf_counter() - persistence_started_at) * 1000)
     logger.info(
-        "STORYBOARD_TIMING success=%s project_id=%s story_id=%s pipeline_id=%s provider=%s model=%s script_chars=%s shots=%s prompt_tokens=%s completion_tokens=%s load_context_ms=%s parse_storyboard_ms=%s persistence_ms=%s total_ms=%s",
+        "STORYBOARD_TIMING success=%s project_id=%s story_id=%s pipeline_id=%s provider=%s model=%s script_chars=%s shots=%s prompt_tokens=%s completion_tokens=%s cache_enabled=%s cached_tokens=%s uncached_prompt_tokens=%s cache_hit_ratio=%s load_context_ms=%s parse_storyboard_ms=%s persistence_ms=%s total_ms=%s",
         True,
         project_id,
         tracking_story_id,
@@ -914,8 +947,12 @@ async def generate_storyboard(
         effective_model or "(default)",
         len(req.script or ""),
         len(shots),
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
+        storyboard_usage.get("prompt_tokens", 0),
+        storyboard_usage.get("completion_tokens", 0),
+        storyboard_usage.get("cache_enabled"),
+        storyboard_usage.get("cached_tokens"),
+        storyboard_usage.get("uncached_prompt_tokens"),
+        storyboard_usage.get("cache_hit_ratio"),
         load_context_ms,
         parse_storyboard_ms,
         persistence_ms,
@@ -926,10 +963,7 @@ async def generate_storyboard(
         pipeline_id=pipeline_id,
         story_id=tracking_story_id,
         shots=shots,
-        usage={
-            "prompt_tokens": usage.get("prompt_tokens", 0),
-            "completion_tokens": usage.get("completion_tokens", 0),
-        },
+        usage=storyboard_usage,
     )
 
 @router.post("/{project_id}/generate-assets", response_model=PipelineActionResponse)

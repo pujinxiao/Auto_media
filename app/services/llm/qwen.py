@@ -1,6 +1,6 @@
 from openai import AsyncOpenAI
-from app.services.llm.base import BaseLLMProvider
-from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars
+from app.services.llm.base import BaseLLMProvider, build_message_blocks, estimate_cacheable_prefix_tokens
+from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars, normalize_usage
 
 
 class QwenProvider(BaseLLMProvider):
@@ -8,6 +8,7 @@ class QwenProvider(BaseLLMProvider):
 
     def __init__(self, api_key: str, base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1", model: str = "qwen-plus"):
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._base_url = base_url
         self._model = model
 
     async def complete(self, system: str, user: str, temperature: float = 0.3, telemetry_context=None) -> str:
@@ -37,11 +38,18 @@ class QwenProvider(BaseLLMProvider):
         cache_threshold_tokens: int = 1024,
         telemetry_context=None,
     ) -> tuple[str, dict]:
-        del enable_caching, cache_key, cache_threshold_tokens
-        request_messages = [
-            {"role": message.get("role", "user"), "content": message.get("content", "")}
-            for message in messages
-        ]
+        del cache_key
+        stable_token_budget = estimate_cacheable_prefix_tokens(system=system, messages=messages)
+        use_caching = enable_caching and stable_token_budget >= cache_threshold_tokens
+
+        request_messages = []
+        for message in messages:
+            content = message.get("content", "")
+            if use_caching and bool(message.get("cacheable")) and "dashscope" in str(self._base_url or ""):
+                content = build_message_blocks(content, cacheable=True)
+            request_messages.append(
+                {"role": message.get("role", "user"), "content": content}
+            )
         if system:
             request_messages = [{"role": "system", "content": system}, *request_messages]
 
@@ -66,6 +74,7 @@ class QwenProvider(BaseLLMProvider):
         chunks: list[str] = []
         prompt_tokens = 0
         completion_tokens = 0
+        last_usage_obj = None
         try:
             async for chunk in stream:
                 choices = getattr(chunk, "choices", None) or []
@@ -76,20 +85,27 @@ class QwenProvider(BaseLLMProvider):
                         chunks.append(delta)
                 usage_obj = getattr(chunk, "usage", None)
                 if usage_obj:
+                    last_usage_obj = usage_obj
                     prompt_tokens += getattr(usage_obj, "prompt_tokens", 0) or 0
                     completion_tokens += getattr(usage_obj, "completion_tokens", 0) or 0
         except Exception as exc:
             tracker.record_failure(
                 exc,
-                usage={"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens},
+                usage={
+                    **normalize_usage(last_usage_obj),
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cache_enabled": use_caching,
+                },
                 response_text="".join(chunks),
             )
             raise
 
-        usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-        }
+        usage = normalize_usage(last_usage_obj)
+        usage["prompt_tokens"] = prompt_tokens
+        usage["completion_tokens"] = completion_tokens
+        if use_caching:
+            usage["cache_enabled"] = True
         text = "".join(chunks)
         tracker.record_success(usage=usage, response_text=text)
         return text, usage

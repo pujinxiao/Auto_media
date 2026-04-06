@@ -987,6 +987,50 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
             any(call.args and "STORYBOARD_TIMING" in str(call.args[0]) for call in info_mock.call_args_list)
         )
 
+    async def test_generate_storyboard_returns_cache_metrics_in_usage(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        req = StoryboardRequest(script="scene script", provider="openai", model="gpt-test")
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch("app.routers.pipeline._load_story_context", new=AsyncMock(return_value=({}, None))),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(
+                            return_value=(
+                                [self._make_shot()],
+                                {
+                                    "prompt_tokens": 1000,
+                                    "completion_tokens": 50,
+                                    "cache_enabled": True,
+                                    "cached_tokens": 800,
+                                },
+                            )
+                        ),
+                    ),
+                ):
+                    result = await generate_storyboard(
+                        "story-cache-usage",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertEqual(result.usage.prompt_tokens, 1000)
+        self.assertEqual(result.usage.cached_tokens, 800)
+        self.assertEqual(result.usage.uncached_prompt_tokens, 200)
+        self.assertEqual(result.usage.cache_hit_ratio, 0.8)
+        self.assertTrue(result.usage.cache_enabled)
+
     async def test_generate_storyboard_reuses_short_character_section_filtering_for_script_mentions(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         session_factory = async_sessionmaker(engine, expire_on_commit=False)

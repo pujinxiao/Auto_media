@@ -17,6 +17,7 @@ from app.core.pipeline_runtime import (
     resolve_tracking_story_id,
 )
 from app.main import app
+from app.prompts.character import build_character_section
 from app.routers.image import generate_images as generate_single_images, ImageRequest
 from app.routers.pipeline import (
     _resolve_public_base_url,
@@ -952,6 +953,288 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(state["generated_files"].keys()), ["storyboard"])
         self.assertEqual(state["final_video_url"], "")
         self.assertEqual(state["shots"][0]["shot_id"], "scene1_shot1")
+
+    async def test_generate_storyboard_logs_stage_timings(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        req = StoryboardRequest(script="scene script", provider="openai", model="gpt-test")
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch("app.routers.pipeline._load_story_context", new=AsyncMock(return_value=({}, None))),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(return_value=([self._make_shot()], {"prompt_tokens": 1, "completion_tokens": 1})),
+                    ),
+                    patch("app.routers.pipeline.logger.info") as info_mock,
+                ):
+                    await generate_storyboard(
+                        "story-log-timings",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertTrue(
+            any(call.args and "STORYBOARD_TIMING" in str(call.args[0]) for call in info_mock.call_args_list)
+        )
+
+    async def test_generate_storyboard_returns_cache_metrics_in_usage(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        req = StoryboardRequest(script="scene script", provider="openai", model="gpt-test")
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch("app.routers.pipeline._load_story_context", new=AsyncMock(return_value=({}, None))),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(
+                            return_value=(
+                                [self._make_shot()],
+                                {
+                                    "prompt_tokens": 1000,
+                                    "completion_tokens": 50,
+                                    "cache_enabled": True,
+                                    "cached_tokens": 800,
+                                },
+                            )
+                        ),
+                    ),
+                ):
+                    result = await generate_storyboard(
+                        "story-cache-usage",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertEqual(result.usage.prompt_tokens, 1000)
+        self.assertEqual(result.usage.cached_tokens, 800)
+        self.assertEqual(result.usage.uncached_prompt_tokens, 200)
+        self.assertEqual(result.usage.cache_hit_ratio, 0.8)
+        self.assertTrue(result.usage.cache_enabled)
+
+    async def test_generate_storyboard_reuses_short_character_section_filtering_for_script_mentions(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        story = {
+            "id": "story-filtered-characters",
+            "idea": "idea",
+            "genre": "genre",
+            "tone": "tone",
+            "characters": [
+                {"id": "char_li_ming", "name": "Li Ming", "role": "lead", "description": "young man, short black hair"},
+                {"id": "char_a_yue", "name": "A Yue", "role": "support", "description": "young woman, long hair"},
+            ],
+            "character_images": {},
+            "meta": {},
+        }
+        story_context = build_story_context(story)
+        req = StoryboardRequest(script="Li Ming stands at the doorway.", provider="openai", model="gpt-test", story_id=story["id"])
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch(
+                        "app.routers.pipeline._load_story_context",
+                        new=AsyncMock(return_value=(story, story_context)),
+                    ),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(return_value=([self._make_shot()], {"prompt_tokens": 1, "completion_tokens": 1})),
+                    ) as parse_mock,
+                ):
+                    await generate_storyboard(
+                        "story-filtered-characters",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertNotIn("character_section_override", parse_mock.await_args.kwargs)
+        character_section = build_character_section(
+            parse_mock.await_args.kwargs["character_info"],
+            script=req.script,
+        )
+        self.assertIn("Li Ming", character_section)
+        self.assertNotIn("A Yue", character_section)
+
+    async def test_generate_storyboard_filters_using_serialized_script_body_not_character_header(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        story = {
+            "id": "story-filtered-serialized-script",
+            "idea": "idea",
+            "genre": "genre",
+            "tone": "tone",
+            "characters": [
+                {"id": "char_li_ming", "name": "Li Ming", "role": "lead", "description": "young man, short black hair"},
+                {"id": "char_a_yue", "name": "A Yue", "role": "support", "description": "young woman, long hair"},
+            ],
+            "character_images": {},
+            "meta": {},
+            "scenes": [
+                {
+                    "episode": 1,
+                    "title": "Rainy Night",
+                    "scenes": [
+                        {
+                            "scene_number": 1,
+                            "environment": "doorway",
+                            "visual": "Li Ming stands at the doorway and looks into the room.",
+                            "audio": [],
+                        }
+                    ],
+                }
+            ],
+        }
+        story_context = build_story_context(story)
+        req = StoryboardRequest(
+            script=serialize_story_to_script(story),
+            provider="openai",
+            model="gpt-test",
+            story_id=story["id"],
+        )
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch(
+                        "app.routers.pipeline._load_story_context",
+                        new=AsyncMock(return_value=(story, story_context)),
+                    ),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(return_value=([self._make_shot()], {"prompt_tokens": 1, "completion_tokens": 1})),
+                    ) as parse_mock,
+                ):
+                    await generate_storyboard(
+                        "story-filtered-serialized-script",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertNotIn("character_section_override", parse_mock.await_args.kwargs)
+        character_section = build_character_section(
+            parse_mock.await_args.kwargs["character_info"],
+            script=req.script,
+        )
+        self.assertIn("Li Ming", character_section)
+        self.assertNotIn("A Yue", character_section)
+
+    async def test_generate_storyboard_filters_using_character_aliases(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        request = Request({"type": "http", "headers": []})
+        story = {
+            "id": "story-filtered-character-aliases",
+            "idea": "idea",
+            "genre": "genre",
+            "tone": "tone",
+            "characters": [
+                {
+                    "id": "char_boss_zhao",
+                    "name": "Boss Zhao",
+                    "role": "support",
+                    "description": "middle-aged man, moustache",
+                    "aliases": ["赵掌柜"],
+                },
+                {
+                    "id": "char_a_yue",
+                    "name": "A Yue",
+                    "role": "support",
+                    "description": "young woman, long hair",
+                },
+            ],
+            "character_images": {},
+            "meta": {},
+            "scenes": [
+                {
+                    "episode": 1,
+                    "title": "Rainy Night",
+                    "scenes": [
+                        {
+                            "scene_number": 1,
+                            "environment": "counter",
+                            "visual": "赵掌柜站在柜台后抬眼看向门口。",
+                            "audio": [],
+                        }
+                    ],
+                }
+            ],
+        }
+        story_context = build_story_context(story)
+        req = StoryboardRequest(
+            script=serialize_story_to_script(story),
+            provider="openai",
+            model="gpt-test",
+            story_id=story["id"],
+        )
+
+        try:
+            async with session_factory() as session:
+                with (
+                    patch(
+                        "app.routers.pipeline._load_story_context",
+                        new=AsyncMock(return_value=(story, story_context)),
+                    ),
+                    patch(
+                        "app.routers.pipeline.parse_script_to_storyboard",
+                        new=AsyncMock(return_value=([self._make_shot()], {"prompt_tokens": 1, "completion_tokens": 1})),
+                    ) as parse_mock,
+                ):
+                    await generate_storyboard(
+                        "story-filtered-character-aliases",
+                        request,
+                        req,
+                        llm={"provider": "openai", "model": "gpt-test", "api_key": "test-key", "base_url": "https://example.com/v1"},
+                        db=session,
+                    )
+        finally:
+            await engine.dispose()
+
+        self.assertNotIn("character_section_override", parse_mock.await_args.kwargs)
+        character_section = build_character_section(
+            parse_mock.await_args.kwargs["character_info"],
+            script=req.script,
+        )
+        self.assertIn("Boss Zhao / 赵掌柜", character_section)
+        self.assertNotIn("A Yue", character_section)
 
 
 class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):

@@ -49,6 +49,12 @@ class Shot(BaseModel):
 class Usage(BaseModel):
     prompt_tokens: int = Field(default=0, description="Number of prompt tokens used")
     completion_tokens: int = Field(default=0, description="Number of completion tokens used")
+    cached_tokens: Optional[int] = Field(default=None, description="Prompt tokens served from cache")
+    uncached_prompt_tokens: Optional[int] = Field(default=None, description="Prompt tokens not served from cache")
+    cache_creation_input_tokens: Optional[int] = Field(default=None, description="Prompt tokens spent creating cache")
+    cache_read_input_tokens: Optional[int] = Field(default=None, description="Prompt tokens read from provider cache")
+    cache_hit_ratio: Optional[float] = Field(default=None, description="Cached prompt token ratio")
+    cache_enabled: Optional[bool] = Field(default=None, description="Whether provider-side prompt caching was enabled")
 
 
 class Storyboard(BaseModel):

@@ -744,14 +744,24 @@ def _build_scene_styles(story: Mapping[str, Any]) -> list[SceneStyle]:
     return styles
 
 
-def build_clean_character_section(character_locks: dict[str, CharacterLock], characters: list[dict]) -> str:
+def build_clean_character_section(character_locks: dict[str, CharacterLock], characters: list[dict], script: str = "") -> str:
     if not characters:
         return ""
+    if script:
+        matched_characters = [
+            character
+            for character in characters
+            if _safe_name_match(_character_name_candidates(character), script)
+        ]
+        if matched_characters:
+            characters = matched_characters
 
     lines = ["## Character Reference (maintain exact physical consistency across all shots)"]
     for character in characters:
         char_id = character.get("id", "")
-        name = character.get("name", "")
+        name_candidates = _character_name_candidates(character)
+        name = name_candidates[0] if name_candidates else str(character.get("name", ""))
+        display_name = " / ".join(name_candidates[:3]) if script and len(name_candidates) > 1 else name
         role = character.get("role", "")
         desc = sanitize_character_profile_description(character.get("description", ""))
         if not char_id or not name:
@@ -759,9 +769,9 @@ def build_clean_character_section(character_locks: dict[str, CharacterLock], cha
 
         lock = character_locks.get(char_id, CharacterLock(name=name))
         if desc:
-            lines.append(f"- **{name}**（{role}）：{desc}")
+            lines.append(f"- **{display_name}**（{role}）：{desc}")
         else:
-            lines.append(f"- **{name}**（{role}）")
+            lines.append(f"- **{display_name}**（{role}）")
 
         visual_bits = [bit for bit in (lock.body_features, lock.default_clothing) if bit]
         if visual_bits:
@@ -918,23 +928,77 @@ def _shot_text_haystack(shot: ShotLike, *, include_last_frame: bool = True) -> s
     return _collapse_spaces(" ".join(parts))
 
 
-def _safe_name_match(name: str, haystack: str) -> bool:
-    normalized_name = _collapse_spaces(name)
-    normalized_haystack = _collapse_spaces(haystack)
-    if not normalized_name or not normalized_haystack:
+def _character_name_candidates(character: Mapping[str, Any] | None) -> list[str]:
+    data = character if isinstance(character, Mapping) else {}
+    raw_candidates: list[Any] = [data.get("name")]
+
+    aliases_value = data.get("aliases")
+    if isinstance(aliases_value, str):
+        raw_candidates.append(aliases_value)
+    elif isinstance(aliases_value, (list, tuple, set)):
+        raw_candidates.extend(list(aliases_value))
+
+    title_value = data.get("title")
+    if isinstance(title_value, str):
+        raw_candidates.append(title_value)
+
+    titles_value = data.get("titles")
+    if isinstance(titles_value, str):
+        raw_candidates.append(titles_value)
+    elif isinstance(titles_value, (list, tuple, set)):
+        raw_candidates.extend(list(titles_value))
+
+    candidates: list[str] = []
+    seen_candidates: set[str] = set()
+    for raw_candidate in raw_candidates:
+        candidate = _collapse_spaces(str(raw_candidate or ""))
+        candidate_key = candidate.casefold()
+        if not candidate or candidate_key in seen_candidates:
+            continue
+        seen_candidates.add(candidate_key)
+        candidates.append(candidate)
+    return candidates
+
+
+def _safe_name_match(name: Any, haystack: str) -> bool:
+    raw_candidates = [name] if isinstance(name, str) else list(name or [])
+    normalized_candidates: list[str] = []
+    seen_candidates: set[str] = set()
+    for raw_candidate in raw_candidates:
+        normalized_candidate = _collapse_spaces(str(raw_candidate or ""))
+        candidate_key = normalized_candidate.casefold()
+        if not normalized_candidate or candidate_key in seen_candidates:
+            continue
+        seen_candidates.add(candidate_key)
+        normalized_candidates.append(normalized_candidate)
+
+    haystack_text = str(haystack or "")
+    if haystack_text.lstrip().startswith("# 角色信息"):
+        # Serialized storyboard scripts embed a full character roster ahead of the scene body.
+        # Strip that leading block so name filtering reflects actual scene mentions.
+        haystack_text = re.sub(
+            r"^\s*# 角色信息\b.*?(?=^\s*(?:# 第|## 场景|【)|\Z)",
+            "",
+            haystack_text,
+            flags=re.MULTILINE | re.DOTALL,
+        ).strip()
+    normalized_haystack = _collapse_spaces(haystack_text)
+    if not normalized_candidates or not normalized_haystack:
         return False
 
-    if re.search(r"\b" + re.escape(normalized_name) + r"\b", normalized_haystack, flags=re.IGNORECASE):
-        return True
+    for normalized_name in normalized_candidates:
+        if re.search(r"\b" + re.escape(normalized_name) + r"\b", normalized_haystack, flags=re.IGNORECASE):
+            return True
 
-    # Fallback for CJK names where \b does not split between adjacent ideographs.
-    return bool(
-        re.search(
+        # Fallback for CJK names where \b does not split between adjacent ideographs.
+        if re.search(
             r"(?<![A-Za-z0-9_])" + re.escape(normalized_name) + r"(?![A-Za-z0-9_])",
             normalized_haystack,
             flags=re.IGNORECASE,
-        )
-    )
+        ):
+            return True
+
+    return False
 
 
 def character_appears_in_shot(name: str, shot: ShotLike) -> bool:

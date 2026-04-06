@@ -28,19 +28,18 @@ class StoryboardPromptTests(unittest.TestCase):
         self.assertIn("Reusable Environment Discipline", SYSTEM_PROMPT)
         self.assertIn("same reusable base location", SYSTEM_PROMPT)
         self.assertIn("stable environment elements visible in this shot", SYSTEM_PROMPT)
-        self.assertIn("Mapping from script emotion tags", SYSTEM_PROMPT)
+        self.assertIn("mapping from script emotion tags", SYSTEM_PROMPT)
 
     def test_prompts_enforce_three_core_shots_and_no_transition_shots(self):
         rendered = _render_user_template()
-        self.assertIn("exactly 3 core shots per source scene", SYSTEM_PROMPT)
-        self.assertIn("Never exceed 3 shots for one source scene", SYSTEM_PROMPT)
+        self.assertIn("at most 3 core shots", SYSTEM_PROMPT)
         self.assertIn("Do NOT create extra transition / bridge shots", SYSTEM_PROMPT)
-        self.assertIn("plan only 3 core shots total", rendered)
+        self.assertIn("Plan only 3 core shots total", rendered)
         self.assertIn("Do NOT add dedicated transition shots", rendered)
 
     def test_user_template_mentions_orientation_when_explicitly_needed(self):
         rendered = _render_user_template()
-        self.assertIn("front / side / back facing character orientation", rendered)
+        self.assertIn("front / side / back facing character orientation cue", rendered)
         self.assertIn("orientation is not specified", rendered)
 
     def test_user_template_requires_opening_frame_alignment_between_description_and_prompts(self):
@@ -56,16 +55,15 @@ class StoryboardPromptTests(unittest.TestCase):
         self.assertIn("Primary wardrobe lock", SYSTEM_PROMPT)
         rendered = _render_user_template()
         self.assertIn("Every shot MUST fill `characters`", rendered)
-        self.assertIn("resolve it and write the actual canonical name in `characters`", rendered)
-        self.assertIn("Do NOT put unnamed crowd, passersby, extras, or background strangers into `characters`", rendered)
-        self.assertIn("Lock the main outfit strictly", rendered)
+        self.assertIn("resolve clear pronouns to canonical names", rendered)
+        self.assertIn("exclude unnamed extras", rendered)
 
     def test_prompts_require_audio_speaker_and_narration_mapping(self):
         rendered = _render_user_template()
-        self.assertIn("`audio_reference.speaker`", rendered)
         self.assertIn("speaker` must be `旁白` and `type` must be `narration`", rendered)
-        self.assertIn('"speaker":', rendered)
         self.assertIn("旁白", rendered)
+        self.assertIn("Do NOT invent inner monologue, extra dialogue, or new SFX", SYSTEM_PROMPT)
+        self.assertIn("Never invent inner monologue or extra sound effects", rendered)
 
     def test_user_template_consumes_scene_anchor_props_and_emotion_tags(self):
         rendered = _render_user_template()
@@ -73,9 +71,8 @@ class StoryboardPromptTests(unittest.TestCase):
         self.assertIn("`【内容覆盖清单】`", rendered)
         self.assertIn("`【关键道具】`", rendered)
         self.assertIn("`【情感标尺】`", rendered)
-        self.assertIn("never paste the full environment paragraph into every shot", rendered)
-        self.assertIn("The same `【环境锚点】` keeps the same reusable location identity", rendered)
-        self.assertIn("STEP 1.5", rendered)
+        self.assertIn("Never paste the full environment paragraph into every shot", rendered)
+        self.assertIn("Keep the same `【环境锚点】` wording and location identity", rendered)
         self.assertIn("reuse the same value for shots that stay inside the same source scene", rendered)
 
     def test_prompts_require_scene_coverage_without_silent_omission(self):
@@ -86,9 +83,22 @@ class StoryboardPromptTests(unittest.TestCase):
         self.assertIn("collectively cover every mandatory item from `【内容覆盖清单】`", rendered)
         self.assertIn("nothing important from the source scene was silently dropped", rendered)
 
+    def test_prompts_require_lean_field_budgets_and_no_full_field_duplication(self):
+        rendered = _render_user_template()
+        self.assertIn("Lean Field Writing", SYSTEM_PROMPT)
+        self.assertIn("Keep every field lean and information-dense", SYSTEM_PROMPT)
+        self.assertIn("Avoid restating the same wardrobe, environment, and lighting details", SYSTEM_PROMPT)
+        self.assertIn("2-3 short Chinese sentences", rendered)
+        self.assertIn("one short anchor phrase", rendered)
+        self.assertIn("1 short phrase only", rendered)
+        self.assertIn("1 short sentence only", rendered)
+        self.assertIn("Do not repeat the full same wardrobe/environment/lighting wording across all text fields", rendered)
+        self.assertIn("Do NOT reduce it to action-only text", SYSTEM_PROMPT)
+        self.assertIn("always retain subject/current outfit and key environment anchor", rendered)
+
     def test_user_template_renders_without_format_key_errors(self):
         rendered = _render_user_template()
-        self.assertIn('"audio_reference": {"type": "narration", "speaker": "旁白", "content": "..."}', rendered)
+        self.assertIn("Return a JSON array of shots only", rendered)
 
 
 if __name__ == "__main__":

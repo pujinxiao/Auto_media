@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 
+from app.services.llm.openai import OpenAIProvider
+from app.services.llm.qwen import QwenProvider
 from app.services.llm.telemetry import LLMCallTracker
 from app.services.story_llm import analyze_idea, generate_outline
 from app.services.storyboard import parse_script_to_storyboard
@@ -65,6 +67,34 @@ class LLMTelemetryTrackerTests(unittest.TestCase):
         self.assertIn('operation="storyboard.parse"', success_fields)
         self.assertIn("latency_ms=80", success_fields)
         self.assertIn("success=true", success_fields)
+
+    def test_tracker_logs_cache_metrics_when_present(self):
+        with patch("app.services.llm.telemetry.settings.llm_telemetry_enabled", True):
+            with patch("app.services.llm.telemetry.settings.llm_slow_log_threshold_ms", 500):
+                with patch("app.services.llm.telemetry.time.perf_counter", side_effect=[1.0, 1.08]):
+                    with patch("app.services.llm.telemetry.logger.info") as info_mock:
+                        tracker = LLMCallTracker(
+                            provider="openai",
+                            model="gpt-4o",
+                            request_chars=42,
+                            context={"operation": "storyboard.parse"},
+                        )
+                        tracker.record_success(
+                            usage={
+                                "prompt_tokens": 1000,
+                                "completion_tokens": 50,
+                                "cache_enabled": True,
+                                "cached_tokens": 800,
+                                "cache_creation_input_tokens": 0,
+                            },
+                            response_text="hello world",
+                        )
+
+        success_fields = info_mock.call_args.args[1]
+        self.assertIn("cache_enabled=true", success_fields)
+        self.assertIn("cached_tokens=800", success_fields)
+        self.assertIn("uncached_prompt_tokens=200", success_fields)
+        self.assertIn("cache_hit_ratio=0.8", success_fields)
 
     def test_tracker_logs_failure_context(self):
         with patch("app.services.llm.telemetry.settings.llm_telemetry_enabled", True):
@@ -136,6 +166,161 @@ class StoryboardTelemetryContextTests(unittest.IsolatedAsyncioTestCase):
                 "pipeline_id": "pipe-1",
             },
         )
+
+
+class ProviderPromptCacheTests(unittest.IsolatedAsyncioTestCase):
+    async def test_openai_provider_uses_prompt_cache_key_and_returns_cached_tokens(self):
+        provider = OpenAIProvider(api_key="test-key", model="gpt-4o")
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(
+                prompt_tokens=1800,
+                completion_tokens=12,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=1400),
+            ),
+        )
+        provider._client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=response))
+            )
+        )
+
+        _, usage = await provider.complete_messages_with_usage(
+            system="system" * 400,
+            messages=[
+                {"role": "user", "content": "stable prefix " * 300, "cacheable": True},
+                {"role": "user", "content": "dynamic suffix"},
+            ],
+            enable_caching=True,
+            telemetry_context={"operation": "storyboard.parse"},
+        )
+
+        kwargs = provider._client.chat.completions.create.await_args.kwargs
+        self.assertIn("prompt_cache_key", kwargs["extra_body"])
+        self.assertTrue(usage["cache_enabled"])
+        self.assertEqual(usage["cached_tokens"], 1400)
+
+    async def test_openai_provider_does_not_report_cache_enabled_when_request_has_no_prompt_cache_key(self):
+        provider = OpenAIProvider(
+            api_key="test-key",
+            model="gpt-4o",
+            base_url="https://example-proxy.invalid/v1",
+        )
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(
+                prompt_tokens=1800,
+                completion_tokens=12,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            ),
+        )
+        provider._client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=response))
+            )
+        )
+
+        _, usage = await provider.complete_messages_with_usage(
+            system="system" * 400,
+            messages=[
+                {"role": "user", "content": "stable prefix " * 300, "cacheable": True},
+                {"role": "user", "content": "dynamic suffix"},
+            ],
+            enable_caching=True,
+            telemetry_context={"operation": "storyboard.parse"},
+        )
+
+        kwargs = provider._client.chat.completions.create.await_args.kwargs
+        self.assertIsNone(kwargs["extra_body"])
+        self.assertNotIn("cache_enabled", usage)
+
+    async def test_qwen_provider_marks_cacheable_message_blocks_and_surfaces_cache_usage(self):
+        provider = QwenProvider(api_key="test-key", model="qwen-plus")
+
+        async def stream():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="hello"))],
+                usage=None,
+            )
+            yield SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(
+                    prompt_tokens=1700,
+                    completion_tokens=15,
+                    prompt_tokens_details=SimpleNamespace(
+                        cached_tokens=1200,
+                        cache_creation_input_tokens=100,
+                    ),
+                ),
+            )
+
+        provider._client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=stream()))
+            )
+        )
+
+        _, usage = await provider.complete_messages_with_usage(
+            system="system" * 400,
+            messages=[
+                {"role": "user", "content": "stable prefix " * 300, "cacheable": True},
+                {"role": "user", "content": "dynamic suffix"},
+            ],
+            enable_caching=True,
+            telemetry_context={"operation": "storyboard.parse"},
+        )
+
+        request_messages = provider._client.chat.completions.create.await_args.kwargs["messages"]
+        cacheable_content = request_messages[1]["content"]
+        self.assertIsInstance(cacheable_content, list)
+        self.assertEqual(cacheable_content[0]["cache_control"], {"type": "ephemeral"})
+        self.assertTrue(usage["cache_enabled"])
+        self.assertEqual(usage["cached_tokens"], 1200)
+        self.assertEqual(usage["cache_creation_input_tokens"], 100)
+
+    async def test_qwen_provider_does_not_report_cache_enabled_for_non_dashscope_endpoint(self):
+        provider = QwenProvider(
+            api_key="test-key",
+            model="qwen-plus",
+            base_url="https://example-proxy.invalid/v1",
+        )
+
+        async def stream():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="hello"))],
+                usage=None,
+            )
+            yield SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(
+                    prompt_tokens=1700,
+                    completion_tokens=15,
+                    prompt_tokens_details=SimpleNamespace(
+                        cached_tokens=0,
+                        cache_creation_input_tokens=0,
+                    ),
+                ),
+            )
+
+        provider._client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=AsyncMock(return_value=stream()))
+            )
+        )
+
+        _, usage = await provider.complete_messages_with_usage(
+            system="system" * 400,
+            messages=[
+                {"role": "user", "content": "stable prefix " * 300, "cacheable": True},
+                {"role": "user", "content": "dynamic suffix"},
+            ],
+            enable_caching=True,
+            telemetry_context={"operation": "storyboard.parse"},
+        )
+
+        request_messages = provider._client.chat.completions.create.await_args.kwargs["messages"]
+        self.assertIsInstance(request_messages[1]["content"], str)
+        self.assertNotIn("cache_enabled", usage)
 
 
 class StoryLlmTelemetryIntegrationTests(unittest.IsolatedAsyncioTestCase):

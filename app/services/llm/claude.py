@@ -1,6 +1,10 @@
 import anthropic
-from app.services.llm.base import BaseLLMProvider, estimate_tokens
-from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars
+from app.services.llm.base import (
+    BaseLLMProvider,
+    build_message_blocks,
+    estimate_cacheable_prefix_tokens,
+)
+from app.services.llm.telemetry import LLMCallTracker, estimate_request_chars, normalize_usage
 
 class ClaudeProvider(BaseLLMProvider):
     provider_name = "claude"
@@ -50,40 +54,10 @@ class ClaudeProvider(BaseLLMProvider):
             tracker.record_failure(exc)
             raise
         usage_obj = getattr(msg, "usage", None)
-        usage = {
-            "prompt_tokens": usage_obj.input_tokens if usage_obj else 0,
-            "completion_tokens": usage_obj.output_tokens if usage_obj else 0,
-        }
+        usage = normalize_usage(usage_obj)
         text = msg.content[0].text
         tracker.record_success(usage=usage, response_text=text)
         return text, usage
-
-    @staticmethod
-    def _message_blocks(content, *, cacheable: bool = False) -> list[dict]:
-        if isinstance(content, list):
-            blocks = []
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        block = {"type": "text", "text": str(item.get("text", ""))}
-                        if cacheable and block["text"]:
-                            block["cache_control"] = {"type": "ephemeral"}
-                        blocks.append(block)
-                    else:
-                        blocks.append(item)
-                else:
-                    text = str(item)
-                    block = {"type": "text", "text": text}
-                    if cacheable and text:
-                        block["cache_control"] = {"type": "ephemeral"}
-                    blocks.append(block)
-            return blocks
-
-        text = str(content or "")
-        block = {"type": "text", "text": text}
-        if cacheable and text:
-            block["cache_control"] = {"type": "ephemeral"}
-        return [block]
 
     async def complete_messages_with_usage(
         self,
@@ -96,21 +70,17 @@ class ClaudeProvider(BaseLLMProvider):
         telemetry_context=None,
     ) -> tuple[str, dict]:
         del cache_key
-        stable_token_budget = 0
-        if system:
-            stable_token_budget += estimate_tokens({"role": "system", "content": system})
-        for message in messages:
-            stable_token_budget += estimate_tokens(message)
-            if message.get("cacheable"):
-                break
-        use_caching = enable_caching and stable_token_budget >= cache_threshold_tokens
+        use_caching = (
+            enable_caching
+            and estimate_cacheable_prefix_tokens(system=system, messages=messages) >= cache_threshold_tokens
+        )
 
         request_messages = []
         for message in messages:
             request_messages.append(
                 {
                     "role": message.get("role", "user"),
-                    "content": self._message_blocks(
+                    "content": build_message_blocks(
                         message.get("content", ""),
                         cacheable=use_caching and bool(message.get("cacheable")),
                     ),
@@ -135,11 +105,8 @@ class ClaudeProvider(BaseLLMProvider):
             tracker.record_failure(exc, extra={"cache_enabled": use_caching})
             raise
         usage_obj = getattr(msg, "usage", None)
-        usage = {
-            "prompt_tokens": usage_obj.input_tokens if usage_obj else 0,
-            "completion_tokens": usage_obj.output_tokens if usage_obj else 0,
-            "cache_enabled": use_caching,
-        }
+        usage = normalize_usage(usage_obj)
+        usage["cache_enabled"] = use_caching
         text = msg.content[0].text
         tracker.record_success(usage=usage, response_text=text)
         return text, usage

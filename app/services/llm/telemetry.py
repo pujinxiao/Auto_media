@@ -10,6 +10,7 @@ from app.core.config import settings
 
 
 logger = logging.getLogger(__name__)
+_MISSING = object()
 
 
 def _coerce_int(value: Any) -> int:
@@ -34,6 +35,26 @@ def _message_text(message: Mapping[str, Any]) -> str:
     return str(content)
 
 
+def _lookup_usage_value(source: Any, *path: str) -> Any:
+    current = source
+    for key in path:
+        if isinstance(current, Mapping):
+            current = current.get(key, _MISSING)
+        else:
+            current = getattr(current, key, _MISSING)
+        if current is _MISSING:
+            return None
+    return current
+
+
+def _first_usage_value(source: Any, *paths: tuple[str, ...]) -> Any:
+    for path in paths:
+        value = _lookup_usage_value(source, *path)
+        if value is not None:
+            return value
+    return None
+
+
 def estimate_request_chars(
     *,
     system: str = "",
@@ -48,24 +69,47 @@ def estimate_request_chars(
 
 
 def normalize_usage(usage: Any) -> dict[str, Any]:
-    if isinstance(usage, Mapping):
-        normalized = {
-            "prompt_tokens": _coerce_int(usage.get("prompt_tokens", usage.get("input_tokens", 0))),
-            "completion_tokens": _coerce_int(usage.get("completion_tokens", usage.get("output_tokens", 0))),
-        }
-        if "cache_enabled" in usage:
-            normalized["cache_enabled"] = bool(usage.get("cache_enabled"))
-        return normalized
-
     normalized = {
-        "prompt_tokens": _coerce_int(getattr(usage, "prompt_tokens", getattr(usage, "input_tokens", 0))),
-        "completion_tokens": _coerce_int(
-            getattr(usage, "completion_tokens", getattr(usage, "output_tokens", 0))
-        ),
+        "prompt_tokens": _coerce_int(_first_usage_value(usage, ("prompt_tokens",), ("input_tokens",))),
+        "completion_tokens": _coerce_int(_first_usage_value(usage, ("completion_tokens",), ("output_tokens",))),
     }
-    cache_enabled = getattr(usage, "cache_enabled", None)
+
+    cache_enabled = _first_usage_value(usage, ("cache_enabled",))
     if cache_enabled is not None:
         normalized["cache_enabled"] = bool(cache_enabled)
+
+    cached_tokens = _first_usage_value(
+        usage,
+        ("cached_tokens",),
+        ("prompt_tokens_details", "cached_tokens"),
+        ("cache_read_input_tokens",),
+        ("prompt_tokens_details", "cache_read_input_tokens"),
+        ("claude_cache_tokens_details", "cache_read_input_tokens"),
+    )
+    if cached_tokens is not None:
+        normalized["cached_tokens"] = _coerce_int(cached_tokens)
+
+    cache_creation_input_tokens = _first_usage_value(
+        usage,
+        ("cache_creation_input_tokens",),
+        ("prompt_tokens_details", "cache_creation_input_tokens"),
+        ("cache_creation", "cache_creation_input_tokens"),
+        ("prompt_tokens_details", "cache_creation", "cache_creation_input_tokens"),
+        ("claude_cache_tokens_details", "cache_creation_input_tokens"),
+    )
+    if cache_creation_input_tokens is not None:
+        normalized["cache_creation_input_tokens"] = _coerce_int(cache_creation_input_tokens)
+
+    cache_read_input_tokens = _first_usage_value(
+        usage,
+        ("cache_read_input_tokens",),
+        ("prompt_tokens_details", "cache_read_input_tokens"),
+        ("claude_cache_tokens_details", "cache_read_input_tokens"),
+    )
+    if cache_read_input_tokens is not None:
+        normalized["cache_read_input_tokens"] = _coerce_int(cache_read_input_tokens)
+        normalized.setdefault("cached_tokens", normalized["cache_read_input_tokens"])
+
     return normalized
 
 
@@ -175,6 +219,12 @@ class LLMCallTracker:
             fields["first_token_ms"] = round((self._first_token_at - self._started_at) * 1000)
         if "cache_enabled" in usage_info:
             fields["cache_enabled"] = usage_info["cache_enabled"]
+        for key in ("cached_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+            if key in usage_info:
+                fields[key] = usage_info[key]
+        if fields["prompt_tokens"] and "cached_tokens" in usage_info:
+            fields["uncached_prompt_tokens"] = max(fields["prompt_tokens"] - usage_info["cached_tokens"], 0)
+            fields["cache_hit_ratio"] = round(usage_info["cached_tokens"] / fields["prompt_tokens"], 4)
         if error is not None:
             fields["error_type"] = type(error).__name__
         for key, value in merged_context.items():

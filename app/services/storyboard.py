@@ -220,6 +220,38 @@ _GENERIC_SPEAKER_LABELS = {
     "男孩",
     "女孩",
 }
+_NARRATOR_SPEAKER_LABELS = {
+    "旁白",
+    "画外音",
+    "解说",
+    "narrator",
+    "narration",
+    "voiceover",
+    "voice over",
+    "voice-over",
+}
+_SCRIPT_SFX_LABELS = {
+    "音效",
+    "声效",
+    "sfx",
+    "fx",
+    "sound effect",
+    "sound effects",
+}
+_SCRIPT_METADATA_LABELS = {
+    "场景标题",
+    "环境锚点",
+    "环境",
+    "光线",
+    "氛围",
+    "情感标尺",
+    "关键道具",
+    "画面",
+    "内容覆盖清单",
+    "动作拆解",
+    "镜头建议",
+    "过渡",
+}
 
 
 def _strip_terminal_punctuation(text: str) -> str:
@@ -231,9 +263,17 @@ def _collapse_spaces(text: str) -> str:
 
 
 def _trim_words(text: str, limit: int) -> str:
-    words = _collapse_spaces(text).split()
+    cleaned = _collapse_spaces(text)
+    if not cleaned:
+        return ""
+
+    words = cleaned.split()
     if len(words) <= limit:
-        return _strip_terminal_punctuation(_collapse_spaces(text))
+        if _contains_cjk(cleaned) and len(words) <= 1:
+            char_limit = max(limit * 3, 1)
+            if len(cleaned) > char_limit:
+                return _strip_terminal_punctuation(cleaned[:char_limit].rstrip())
+        return _strip_terminal_punctuation(cleaned)
     return _strip_terminal_punctuation(" ".join(words[:limit]))
 
 
@@ -392,6 +432,11 @@ def _stringify_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_audio_content_key(value: Any) -> str:
+    cleaned = re.sub(r"^[（(【\[][^）)】\]]{0,12}[）)】\]]\s*", "", _stringify_text(value))
+    return _strip_terminal_punctuation(_collapse_spaces(cleaned)).casefold()
+
+
 def _coerce_estimated_duration(value: Any) -> int:
     try:
         duration = int(value)
@@ -406,7 +451,7 @@ def _normalize_audio_reference(value: Any, legacy_dialogue: Any = None) -> dict[
         raw_type = _collapse_spaces(value.get("type")).lower()
         raw_speaker = _stringify_text(value.get("speaker") or value.get("character") or value.get("voice"))
         speaker_lower = raw_speaker.casefold()
-        is_narrator = speaker_lower in {"旁白", "画外音", "解说", "narrator", "narration", "voiceover", "voice over", "voice-over"}
+        is_narrator = speaker_lower in _NARRATOR_SPEAKER_LABELS
         speaker = "旁白" if is_narrator else (raw_speaker or None)
         if raw_type in {"dialogue", "dialog", "speech", "spoken"}:
             ref_type = "dialogue"
@@ -679,6 +724,133 @@ def _load_storyboard_items(raw: str) -> list[Any]:
     raise ValueError("Storyboard response is not a valid JSON array or object")
 
 
+def _extract_script_scene_number(line: str) -> int | None:
+    scene_match = re.search(r"(?:【\s*场景\s*(\d+)\s*】|^##\s*场景\s*(\d+)\s*$)", line)
+    if not scene_match:
+        return None
+    return int(scene_match.group(1) or scene_match.group(2))
+
+
+def _build_script_audio_lookup(
+    script: str,
+    *,
+    scene_mapping: Optional[dict[int, str]] = None,
+) -> dict[str, dict[tuple[str, str, str | None], dict[str, Any]]]:
+    allowed_audio: dict[str, dict[tuple[str, str, str | None], dict[str, Any]]] = {}
+    current_scene_key = "scene1"
+    scene_index = 0
+
+    def _register(scene_key: str, ref_type: str, speaker: str | None, content: str) -> None:
+        content_key = _normalize_audio_content_key(content)
+        if not content_key:
+            return
+        normalized_type = _stringify_text(ref_type).lower()
+        normalized_speaker = _stringify_text(speaker) or None
+        bucket_key = (content_key, normalized_type, normalized_speaker)
+        bucket = allowed_audio.setdefault(scene_key, {})
+        bucket[bucket_key] = {
+            "type": normalized_type,
+            "speaker": normalized_speaker,
+            "content": _stringify_text(content),
+        }
+
+    for raw_line in (script or "").splitlines():
+        line = _collapse_spaces(raw_line)
+        if not line:
+            continue
+
+        if _extract_script_scene_number(line) is not None:
+            scene_index += 1
+            current_scene_key = (scene_mapping or {}).get(scene_index) or f"scene{scene_index}"
+            continue
+
+        bracket_match = re.match(r"^【([^】]+)】\s*(.*)$", line)
+        if bracket_match:
+            label = _stringify_text(bracket_match.group(1))
+            content = _stringify_text(bracket_match.group(2))
+            if not content or label in _SCRIPT_METADATA_LABELS:
+                continue
+
+            label_key = label.casefold()
+            if label_key in _NARRATOR_SPEAKER_LABELS:
+                _register(current_scene_key, "narration", "旁白", content)
+            elif label_key in _SCRIPT_SFX_LABELS:
+                _register(current_scene_key, "sfx", None, content)
+            else:
+                _register(current_scene_key, "dialogue", label, content)
+            continue
+
+        coverage_match = re.match(r"^-+\s*台词/旁白[:：]\s*([^：:]+)\s*[:：]\s*(.+)$", line)
+        if not coverage_match:
+            continue
+
+        speaker = _stringify_text(coverage_match.group(1))
+        content = _stringify_text(coverage_match.group(2))
+        if not speaker or not content:
+            continue
+        speaker_key = speaker.casefold()
+        if speaker_key in _NARRATOR_SPEAKER_LABELS:
+            _register(current_scene_key, "narration", "旁白", content)
+        elif speaker_key in _SCRIPT_SFX_LABELS:
+            _register(current_scene_key, "sfx", None, content)
+        else:
+            _register(current_scene_key, "dialogue", speaker, content)
+
+    return allowed_audio
+
+
+def _filter_audio_reference_to_script(
+    audio_reference: dict[str, Any] | None,
+    *,
+    shot_id: str,
+    source_scene_key: str | None,
+    characters: list[str] | None = None,
+    allowed_audio_lookup: Optional[dict[str, dict[tuple[str, str, str | None], dict[str, Any]]]] = None,
+) -> dict[str, Any] | None:
+    normalized = _finalize_audio_reference(audio_reference, characters=characters)
+    if not normalized:
+        return None
+
+    scene_key = _stringify_text(source_scene_key)
+    if not scene_key:
+        shot_match = re.match(r"scene(\d+)_shot", _collapse_spaces(shot_id), flags=re.IGNORECASE)
+        scene_key = f"scene{shot_match.group(1)}" if shot_match else "scene1"
+
+    content_key = _normalize_audio_content_key(normalized.get("content"))
+    if not content_key:
+        return None
+
+    normalized_type = _stringify_text(normalized.get("type")).lower()
+    normalized_speaker = _stringify_text(normalized.get("speaker")) or None
+    scene_bucket = (allowed_audio_lookup or {}).get(scene_key, {})
+    scene_entries = list(reversed(list(scene_bucket.items())))
+    content_matches = [
+        entry
+        for (candidate_content_key, candidate_type, candidate_speaker), entry in scene_entries
+        if candidate_content_key == content_key
+        and (not normalized_type or candidate_type == normalized_type)
+    ]
+    if not content_matches:
+        return None
+
+    matched_audio = next(
+        (
+            entry
+            for (candidate_content_key, candidate_type, candidate_speaker), entry in scene_entries
+            if candidate_content_key == content_key
+            and (not normalized_type or candidate_type == normalized_type)
+            and candidate_speaker == normalized_speaker
+        ),
+        None,
+    )
+    if not matched_audio and normalized_speaker is None and len(content_matches) == 1:
+        matched_audio = content_matches[0]
+    if not matched_audio:
+        return None
+
+    return _finalize_audio_reference(dict(matched_audio), characters=characters)
+
+
 def _strip_patterns(text: str, patterns: tuple[str, ...]) -> str:
     cleaned = text or ""
     for pattern in patterns:
@@ -840,7 +1012,7 @@ def _minimal_motion_clause(shot: Shot) -> str:
 def _normalize_image_prompt(text: str) -> str:
     cleaned = _strip_patterns(text, _CONTINUITY_PATTERNS + _STYLE_PATTERNS)
     cleaned = _strip_patterns(cleaned, _CAMERA_MOVEMENT_PATTERNS)
-    return _trim_words(cleaned, 110)
+    return _trim_words(cleaned, 78)
 
 
 def _normalize_video_prompt(text: str) -> str:
@@ -849,7 +1021,7 @@ def _normalize_video_prompt(text: str) -> str:
     cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
     cleaned = re.sub(r"(?:,\s*){2,}", ", ", cleaned)
     cleaned = re.sub(r"(^|[.])\s*,\s*", r"\1 ", cleaned)
-    return _trim_words(cleaned, 85)
+    return _trim_words(cleaned, 64)
 
 
 def _freeze_action_phrase(text: str) -> str:
@@ -924,10 +1096,10 @@ def _camera_movement_sentence(shot: Shot) -> str:
 
 def _compose_image_prompt(shot: Shot) -> str:
     lang = _preferred_language(shot)
-    subject = _trim_words(shot.visual_elements.subject_and_clothing, 28)
+    subject = _trim_words(shot.visual_elements.subject_and_clothing, 20)
     pose = _freeze_action_phrase(shot.visual_elements.action_and_expression)
-    environment = _trim_words(shot.visual_elements.environment_and_props, 24)
-    lighting = _trim_words(shot.visual_elements.lighting_and_color, 18)
+    environment = _trim_words(shot.visual_elements.environment_and_props, 18)
+    lighting = _trim_words(shot.visual_elements.lighting_and_color, 12)
     parts = [
         _shot_phrase(shot, lang),
         _sentence_localized(subject, lang),
@@ -935,15 +1107,15 @@ def _compose_image_prompt(shot: Shot) -> str:
         _sentence_localized(environment, lang) if environment else "",
         _sentence_localized(lighting, lang) if lighting else "",
     ]
-    return _trim_words(_join_prompt_parts(parts, lang), 120)
+    return _trim_words(_join_prompt_parts(parts, lang), 88)
 
 
 def _compose_video_prompt(shot: Shot) -> str:
     lang = _preferred_language(shot)
     movement = _camera_movement_sentence(shot)
-    subject = _trim_words(shot.visual_elements.subject_and_clothing, 20)
-    environment = _trim_words(shot.visual_elements.environment_and_props, 14)
-    lighting = _trim_words(shot.visual_elements.lighting_and_color, 12)
+    subject = _trim_words(shot.visual_elements.subject_and_clothing, 16)
+    environment = _trim_words(shot.visual_elements.environment_and_props, 12)
+    lighting = _trim_words(shot.visual_elements.lighting_and_color, 10)
     parts = [
         _shot_phrase(shot, lang),
         movement,
@@ -952,7 +1124,7 @@ def _compose_video_prompt(shot: Shot) -> str:
         _sentence_localized(environment, lang) if environment else "",
         _sentence_localized(lighting, lang) if lighting else "",
     ]
-    return _trim_words(_join_prompt_parts(parts, lang), 85)
+    return _trim_words(_join_prompt_parts(parts, lang), 68)
 
 
 def _postprocess_shot(shot: Shot) -> Shot:
@@ -965,13 +1137,43 @@ def _postprocess_shot(shot: Shot) -> Shot:
         or shot.visual_elements.lighting_and_color
     )
 
+    description_units = _split_text_units(shot.storyboard_description)
+    if description_units:
+        shot.storyboard_description = _trim_words(_join_text_units(description_units[:3]), 48)
+
+    shot.visual_elements.subject_and_clothing = _trim_words(shot.visual_elements.subject_and_clothing, 18)
+    shot.visual_elements.action_and_expression = _trim_words(shot.visual_elements.action_and_expression, 18)
+    shot.visual_elements.environment_and_props = _trim_words(shot.visual_elements.environment_and_props, 16)
+    shot.visual_elements.lighting_and_color = _trim_words(shot.visual_elements.lighting_and_color, 10)
+
+    if shot.mood:
+        shot.mood = _trim_words(shot.mood, 6) or None
+
+    if shot.transition_from_previous:
+        transition_units = _split_text_units(shot.transition_from_previous)
+        if transition_units:
+            shot.transition_from_previous = _trim_words(_join_text_units(transition_units[:2]), 24) or None
+
+    composed_image_prompt = _compose_image_prompt(shot) if has_composable_visuals else ""
+
     # Preserve prompt fields generated by the storyboard LLM whenever available.
     # Recent system-prompt updates intentionally shape image/video prompt wording,
     # length, and language. Rebuilding them here would silently override those changes.
     if raw_image_prompt:
         shot.image_prompt = _normalize_image_prompt(raw_image_prompt)
+        normalized_image_prompt = _collapse_spaces(shot.image_prompt)
+        if composed_image_prompt and normalized_image_prompt:
+            prompt_words = normalized_image_prompt.split()
+            is_sparse_image_prompt = (
+                (_contains_cjk(normalized_image_prompt) and len(normalized_image_prompt) < 28)
+                or (not _contains_cjk(normalized_image_prompt) and len(prompt_words) < 10)
+            )
+            if is_sparse_image_prompt:
+                shot.image_prompt = _normalize_image_prompt(
+                    _merge_text_units(composed_image_prompt, normalized_image_prompt, max_units=4) or composed_image_prompt
+                )
     elif shot.visual_elements.subject_and_clothing or shot.visual_elements.environment_and_props:
-        shot.image_prompt = _compose_image_prompt(shot)
+        shot.image_prompt = composed_image_prompt
     elif raw_video_prompt:
         shot.image_prompt = _normalize_image_prompt(raw_video_prompt)
 
@@ -1015,11 +1217,10 @@ def _build_scene_mapping(script: str) -> dict[int, str]:
         if episode_match:
             current_episode = int(episode_match.group(1))
             continue
-        scene_match = re.search(r"(?:【\s*场景\s*(\d+)\s*】|^##\s*场景\s*(\d+)\s*$)", line)
-        if not scene_match:
+        scene_number = _extract_script_scene_number(line)
+        if scene_number is None:
             continue
         scene_index += 1
-        scene_number = int(scene_match.group(1) or scene_match.group(2))
         mapping[scene_index] = f"ep{current_episode:02d}_scene{scene_number:02d}"
     return mapping
 
@@ -1059,19 +1260,16 @@ def _core_transition_hint(previous_item: Mapping[str, Any], current_item: Mappin
     if lang == "zh":
         if shared_characters:
             subject = "、".join(shared_characters)
-            return f"承接上一核心镜头，保持{subject}的人物外观与主衣物不变，沿用同一场景布局与光线，只衔接到当前动作起点。"
-        return "承接上一核心镜头，保持同一场景布局与光线逻辑，只衔接到当前动作起点。"
+            return f"承接上一镜头，保持{subject}外观与主衣物、场景布局和光线连续，衔接当前动作起点。"
+        return "承接上一镜头，保持场景布局和光线连续，衔接当前动作起点。"
 
     if shared_characters:
         subject = ", ".join(shared_characters)
         return (
-            f"Continue from the previous core shot, keeping {subject} on-model with the same primary outfit, "
-            "while preserving the same environment layout and lighting logic before the next action begins."
+            f"Continue from the previous shot, keep {subject} on-model in the same primary outfit, "
+            "and preserve the same layout and lighting before the next action."
         )
-    return (
-        "Continue from the previous core shot, preserving the same environment layout and lighting logic "
-        "before the next action begins."
-    )
+    return "Continue from the previous shot, preserving the same layout and lighting before the next action."
 
 
 def _scene_core_middle_score(item: Mapping[str, Any], original_index: int, group_size: int) -> tuple[int, float]:
@@ -1294,9 +1492,6 @@ def _merge_core_shot_item(target_item: dict[str, Any], source_item: Mapping[str,
 
 
 def _limit_core_shot_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if len(items) <= 3:
-        return items
-
     grouped_items: list[tuple[str, list[tuple[int, dict[str, Any]]]]] = []
     group_lookup: dict[str, list[tuple[int, dict[str, Any]]]] = {}
     for original_index, item in enumerate(items):
@@ -1314,40 +1509,39 @@ def _limit_core_shot_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     limited: list[dict[str, Any]] = []
     for group_order, (_, group) in enumerate(grouped_items, start=1):
         if len(group) <= 3:
-            limited.extend(item for _, item in group)
-            continue
-
-        first_entry = group[0]
-        last_entry = group[-1]
-        middle_candidates = group[1:-1]
-        middle_entry = max(
-            middle_candidates,
-            key=lambda entry: _scene_core_middle_score(entry[1], entry[0], len(group)),
-        )
-        selected = [first_entry, middle_entry, last_entry]
-        selected.sort(key=lambda entry: entry[0])
-        selected_items = [(original_index, dict(raw_item)) for original_index, raw_item in selected]
-        selected_original_indices = {original_index for original_index, _ in selected}
-        omitted_items = [
-            (original_index, raw_item)
-            for original_index, raw_item in group
-            if original_index not in selected_original_indices
-        ]
-        for omitted_index, omitted_item in omitted_items:
-            best_selected_position = max(
-                range(len(selected_items)),
-                key=lambda selected_position: _score_merge_target(
-                    source_index=omitted_index,
-                    source_item=omitted_item,
-                    target_index=selected_items[selected_position][0],
-                    target_item=selected_items[selected_position][1],
-                ),
+            selected_items = [(original_index, dict(raw_item)) for original_index, raw_item in group]
+        else:
+            first_entry = group[0]
+            last_entry = group[-1]
+            middle_candidates = group[1:-1]
+            middle_entry = max(
+                middle_candidates,
+                key=lambda entry: _scene_core_middle_score(entry[1], entry[0], len(group)),
             )
-            target_index, target_item = selected_items[best_selected_position]
-            selected_items[best_selected_position] = (
-                target_index,
-                _merge_core_shot_item(target_item, omitted_item),
-            )
+            selected = [first_entry, middle_entry, last_entry]
+            selected.sort(key=lambda entry: entry[0])
+            selected_items = [(original_index, dict(raw_item)) for original_index, raw_item in selected]
+            selected_original_indices = {original_index for original_index, _ in selected}
+            omitted_items = [
+                (original_index, raw_item)
+                for original_index, raw_item in group
+                if original_index not in selected_original_indices
+            ]
+            for omitted_index, omitted_item in omitted_items:
+                best_selected_position = max(
+                    range(len(selected_items)),
+                    key=lambda selected_position: _score_merge_target(
+                        source_index=omitted_index,
+                        source_item=omitted_item,
+                        target_index=selected_items[selected_position][0],
+                        target_item=selected_items[selected_position][1],
+                    ),
+                )
+                target_index, target_item = selected_items[best_selected_position]
+                selected_items[best_selected_position] = (
+                    target_index,
+                    _merge_core_shot_item(target_item, omitted_item),
+                )
 
         original_scene_index = _extract_scene_index_from_shot_id(_stringify_text(group[0][1].get("shot_id")))
         scene_index = original_scene_index or group_order
@@ -1374,14 +1568,47 @@ def _limit_core_shot_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return limited
 
 
-def _parse_shots(raw: str, *, scene_mapping: Optional[dict[int, str]] = None) -> List[Shot]:
+def _parse_shots(
+    raw: str,
+    *,
+    scene_mapping: Optional[dict[int, str]] = None,
+    allowed_audio_lookup: Optional[dict[str, dict[tuple[str, str, str | None], dict[str, Any]]]] = None,
+) -> List[Shot]:
     """解析 LLM 输出为 Shot 列表，兼容新旧两种 JSON 格式。"""
     data = [
         _normalize_shot_item(raw_item, shot_number=shot_number, scene_mapping=scene_mapping)
         for shot_number, raw_item in enumerate(_load_storyboard_items(raw), start=1)
     ]
+    for item in data:
+        item["audio_reference"] = _filter_audio_reference_to_script(
+            item.get("audio_reference") if isinstance(item.get("audio_reference"), Mapping) else None,
+            shot_id=_stringify_text(item.get("shot_id")),
+            source_scene_key=_stringify_text(item.get("source_scene_key")) or None,
+            characters=_normalize_character_mentions(item.get("characters")),
+            allowed_audio_lookup=allowed_audio_lookup,
+        )
     data = _limit_core_shot_items(data)
+    scene_items: dict[str, list[dict[str, Any]]] = {}
+    for item in data:
+        scene_key = _stringify_text(item.get("source_scene_key"))
+        if not scene_key:
+            shot_match = re.match(r"scene(\d+)_shot", _collapse_spaces(_stringify_text(item.get("shot_id"))), flags=re.IGNORECASE)
+            scene_key = f"scene{shot_match.group(1)}" if shot_match else "scene1"
+        scene_items.setdefault(scene_key, []).append(item)
+
     shots = []
+    for scene_key, items in scene_items.items():
+        has_retained_audio = any(item.get("audio_reference") for item in items)
+        allowed_audio_items = list((allowed_audio_lookup or {}).get(scene_key, {}).values())
+        if not has_retained_audio and len(allowed_audio_items) == 1:
+            candidate_audio = allowed_audio_items[0]
+            if _stringify_text(candidate_audio.get("type")).lower() == "narration":
+                first_item = items[0]
+                first_item["audio_reference"] = _finalize_audio_reference(
+                    dict(candidate_audio),
+                    characters=_normalize_character_mentions(first_item.get("characters")),
+                )
+
     for shot_number, item in enumerate(data, start=1):
         try:
             shots.append(_postprocess_shot(Shot(**item)))
@@ -1435,9 +1662,10 @@ async def parse_script_to_storyboard(
     Returns:
         tuple: (list of Shot objects, usage dict with prompt_tokens and completion_tokens)
     """
-    character_section = character_section_override or build_character_section(character_info)
+    character_section = character_section_override or build_character_section(character_info, script=script)
     scene_mapping = _build_scene_mapping(script)
     scene_mapping_section = _build_scene_mapping_section(script)
+    script_audio_lookup = _build_script_audio_lookup(script, scene_mapping=scene_mapping)
     llm = get_llm_provider(provider, model=model, api_key=api_key, base_url=base_url)
     try:
         raw, usage = await llm.complete_messages_with_usage(
@@ -1477,5 +1705,5 @@ async def parse_script_to_storyboard(
             f"Storyboard LLM request failed (provider={provider}, model={model or '(default)'}, "
             f"base_url={resolved_base_url}): {exc}"
         ) from exc
-    shots = _parse_shots(raw, scene_mapping=scene_mapping)
+    shots = _parse_shots(raw, scene_mapping=scene_mapping, allowed_audio_lookup=script_audio_lookup)
     return shots, usage

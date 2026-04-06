@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 import unittest
 
 from app.prompts.character import build_character_prompt, build_character_section
@@ -198,6 +199,127 @@ class CharacterPromptTests(unittest.TestCase):
         self.assertIn("黑色短发", section)
         self.assertIn("身形清瘦", section)
         self.assertIn("穿着深蓝长衫", section)
+
+    def test_build_character_section_filters_to_characters_mentioned_in_script(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
+                    {"id": "char_a_yue", "name": "阿月", "role": "配角", "description": "年轻女子，长发。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "阿月",
+                    },
+                },
+            },
+            script="【画面】李明站在门口，抬头看向屋内。",  # noqa: RUF001
+        )
+
+        self.assertIn("李明", section)
+        self.assertNotIn("阿月", section)
+
+    def test_build_character_section_keeps_all_characters_when_script_has_no_explicit_name(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
+                    {"id": "char_a_yue", "name": "阿月", "role": "配角", "description": "年轻女子，长发。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "阿月",
+                    },
+                },
+            },
+            script="【画面】他站在门口，她在屋内回头。",  # noqa: RUF001
+        )
+
+        self.assertIn("李明", section)
+        self.assertIn("阿月", section)
+
+    def test_build_character_section_ignores_serialized_character_header_when_filtering(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {"id": "char_li_ming", "name": "李明", "role": "主角", "description": "青年男子，黑色短发。"},  # noqa: RUF001
+                    {"id": "char_a_yue", "name": "阿月", "role": "配角", "description": "年轻女子，长发。"},  # noqa: RUF001
+                ],
+                "character_images": {
+                    "char_li_ming": {
+                        "visual_dna": "young man, short black hair",
+                        "character_id": "char_li_ming",
+                        "character_name": "李明",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "阿月",
+                    },
+                },
+            },
+            script=(
+                "# 角色信息\n"
+                "- 李明（主角）：青年男子，黑色短发。\n"
+                "- 阿月（配角）：年轻女子，长发。\n\n"
+                "# 第1集 雨夜来客\n\n"
+                "【画面】阿月站在门口，回头看向屋内。"
+            ),  # noqa: RUF001
+        )
+
+        self.assertNotIn("李明", section)
+        self.assertIn("阿月", section)
+
+    def test_build_character_section_filters_to_alias_mentioned_in_script(self):
+        section = build_character_section(
+            {
+                "characters": [
+                    {
+                        "id": "char_boss_zhao",
+                        "name": "Boss Zhao",
+                        "role": "support",
+                        "description": "middle-aged man, moustache.",
+                        "aliases": ["赵掌柜"],
+                    },
+                    {
+                        "id": "char_a_yue",
+                        "name": "A Yue",
+                        "role": "support",
+                        "description": "young woman, long hair.",
+                    },
+                ],
+                "character_images": {
+                    "char_boss_zhao": {
+                        "visual_dna": "middle-aged man, moustache, brown robe",
+                        "character_id": "char_boss_zhao",
+                        "character_name": "Boss Zhao",
+                    },
+                    "char_a_yue": {
+                        "visual_dna": "young woman, long hair",
+                        "character_id": "char_a_yue",
+                        "character_name": "A Yue",
+                    },
+                },
+            },
+            script="【画面】赵掌柜站在柜台后抬眼看向门口。",  # noqa: RUF001
+        )
+
+        self.assertIn("Boss Zhao / 赵掌柜", section)
+        self.assertNotIn("A Yue", section)
 
 
 if __name__ == "__main__":

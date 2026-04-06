@@ -12,7 +12,12 @@ from app.schemas.pipeline import GenerationStrategy, PipelineStatus
 from app.services import tts, image, video, ffmpeg
 from app.services.storyboard import parse_script_to_storyboard
 from app.services import story_repository as repo
-from app.core.story_context import StoryContext, build_character_reference_anchor, build_generation_payload, infer_shot_view_hint
+from app.core.story_context import (
+    StoryContext,
+    build_character_reference_anchor,
+    build_generation_payload,
+    infer_shot_view_hint,
+)
 from app.core.api_keys import inject_art_style
 from app.core.pipeline_runtime import (
     build_runtime_strategy_metadata,
@@ -187,7 +192,6 @@ class PipelineExecutor:
             self.shots, _ = await parse_script_to_storyboard(
                 script, provider, model, api_key=llm_api_key, base_url=llm_base_url,
                 character_info=character_info,
-                character_section_override=self.story_context.clean_character_section if self.story_context else None,
             )
 
             if not self.shots:

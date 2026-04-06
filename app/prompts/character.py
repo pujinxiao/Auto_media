@@ -10,6 +10,7 @@ from app.core.character_profile import (
     extract_character_visual_description,
     sanitize_character_profile_description,
 )
+from app.core.story_context import _character_name_candidates, _safe_name_match
 
 
 # ============================================================================
@@ -64,7 +65,7 @@ def build_character_prompt(name: str, role: str, description: str, art_style: st
 # ============================================================================
 # 分镜角色参考信息块构建
 # ============================================================================
-def build_character_section(character_info: Optional[dict]) -> str:
+def build_character_section(character_info: Optional[dict], script: str = "") -> str:
     """构建传给分镜 LLM 的角色参考信息块。"""
     from app.core.story_context import build_character_reference_anchor
     from app.core.story_assets import get_character_appearance_cache_entry
@@ -79,17 +80,27 @@ def build_character_section(character_info: Optional[dict]) -> str:
         appearance_cache = meta.get("character_appearance_cache") if isinstance(meta.get("character_appearance_cache"), Mapping) else {}
     if not characters:
         return ""
+    if script:
+        matched_characters = [
+            character
+            for character in characters
+            if _safe_name_match(_character_name_candidates(character), script)
+        ]
+        if matched_characters:
+            characters = matched_characters
 
     lines = ["## Character Reference (maintain consistency across all shots)"]
     for c in characters:
         char_id = c.get("id", "")
-        name = c.get("name", "")
+        name_candidates = _character_name_candidates(c)
+        name = name_candidates[0] if name_candidates else c.get("name", "")
+        display_name = " / ".join(name_candidates[:3]) if script and len(name_candidates) > 1 else name
         role = c.get("role", "")
         desc = sanitize_character_profile_description(c.get("description", ""))
         if desc:
-            lines.append(f"- **{name}**（{role}）：{desc}")
+            lines.append(f"- **{display_name}**（{role}）：{desc}")
         else:
-            lines.append(f"- **{name}**（{role}）")
+            lines.append(f"- **{display_name}**（{role}）")
         visual_anchor = build_character_reference_anchor(
             character_images,
             name,

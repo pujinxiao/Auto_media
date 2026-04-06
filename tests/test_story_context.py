@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -1017,6 +1018,145 @@ class ParseStoryboardOverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shots[0].audio_reference.speaker, "李明")
         self.assertEqual(shots[0].audio_reference.content, "别进去。")
 
+    async def test_parse_script_to_storyboard_preserves_duplicate_dialogue_content_speaker_match(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "characters": ["李明", "老板"],
+            "storyboard_description": "老板压低声音下令。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "老板与李明站在茶馆门口",
+              "action_and_expression": "老板侧头低声发话，李明立刻警觉",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "老板和李明对峙在门口。",
+            "final_video_prompt": "老板压低声音说出命令，李明警惕抬眼。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "老板",
+              "content": "快走。"
+            }
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "【环境】茶馆门口\n【李明】快走。\n【老板】快走。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 1)
+        self.assertEqual(shots[0].audio_reference.type, "dialogue")
+        self.assertEqual(shots[0].audio_reference.speaker, "老板")
+        self.assertEqual(shots[0].audio_reference.content, "快走。")
+
+    async def test_parse_script_to_storyboard_preserves_valid_audio_after_core_shot_merge(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "characters": ["李明"],
+            "storyboard_description": "李明先观察前方。",
+            "scene_position": "establishing",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明站在茶馆门口",
+              "action_and_expression": "停步观察前方",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明站在门口观察前方。",
+            "final_video_prompt": "李明停步后观察前方动静。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "李明",
+              "content": "看前面。"
+            }
+          },
+          {
+            "shot_id": "scene1_shot2",
+            "characters": ["李明"],
+            "storyboard_description": "他压低声音催促同伴。",
+            "scene_position": "development",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明贴近门边",
+              "action_and_expression": "压低声音催促同伴",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明贴近门边低声催促。",
+            "final_video_prompt": "李明贴近门边催促同伴先走。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "李明",
+              "content": "先走。"
+            }
+          },
+          {
+            "shot_id": "scene1_shot3",
+            "characters": ["李明"],
+            "storyboard_description": "他再次下令，语气更急。",
+            "scene_position": "climax",
+            "scene_intensity": "high",
+            "camera_setup": {"shot_size": "MCU", "camera_angle": "Eye-level", "movement": "Slow Dolly in"},
+            "visual_elements": {
+              "subject_and_clothing": "李明站在茶馆门口",
+              "action_and_expression": "压低声音再次下令，神情更紧张",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明神情紧张地再次下令。",
+            "final_video_prompt": "李明再次下令，语气更急。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "李明",
+              "content": "快走。"
+            }
+          },
+          {
+            "shot_id": "scene1_shot4",
+            "characters": ["李明"],
+            "storyboard_description": "他回头确认身后动静。",
+            "scene_position": "resolution",
+            "camera_setup": {"shot_size": "CU", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "李明站在门口回头",
+              "action_and_expression": "回头确认身后动静",
+              "environment_and_props": "茶馆木门与灯笼",
+              "lighting_and_color": "暖色灯笼与阴天自然光"
+            },
+            "image_prompt": "李明回头确认身后。",
+            "final_video_prompt": "李明回头确认身后是否有人接近。"
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "【环境】茶馆门口\n【李明】看前面。\n【李明】先走。\n【李明】快走。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 3)
+        self.assertEqual(shots[0].audio_reference.content, "看前面。")
+        self.assertEqual(shots[1].audio_reference.type, "dialogue")
+        self.assertEqual(shots[1].audio_reference.speaker, "李明")
+        self.assertIn("先走", shots[1].audio_reference.content)
+        self.assertIn("快走", shots[1].audio_reference.content)
+
     async def test_parse_script_to_storyboard_tolerates_minor_schema_drift(self):
         response = """
         {
@@ -1063,9 +1203,135 @@ class ParseStoryboardOverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shots[0].camera_setup.movement, "Slow Dolly in")
         self.assertEqual(shots[0].scene_intensity, "low")
         self.assertEqual(shots[0].scene_position, "establishing")
-        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertIsNone(shots[0].audio_reference)
         self.assertTrue(shots[0].image_prompt)
         self.assertTrue(shots[0].final_video_prompt)
+
+    async def test_parse_script_to_storyboard_filters_invented_audio_and_backfills_single_scene_narration(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "characters": ["云影"],
+            "storyboard_description": "她在巷道中潜行。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "压低身形快速移动",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影在阴影里潜行。",
+            "final_video_prompt": "云影快速移动并警惕四周。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "云影",
+              "content": "（内心独白）不能让他们发现我！"
+            }
+          },
+          {
+            "shot_id": "scene1_shot2",
+            "characters": ["云影"],
+            "storyboard_description": "刺客逼近。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Tracking shot"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "攀墙躲避",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影准备攀墙躲避。",
+            "final_video_prompt": "云影攀墙躲避追捕。",
+            "audio_reference": {
+              "type": "sfx",
+              "content": "脚步声，喘息声"
+            }
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "第 1 集：测试\n\n【场景 1】\n【环境】街头巷尾\n【画面】云影在曲折的巷道中快速移动，不时回头查看是否有人跟踪。\n【旁白】在这座古老的城市里，每一条街道都可能成为生死之间的分界线。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 2)
+        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertEqual(shots[0].audio_reference.speaker, "旁白")
+        self.assertEqual(shots[0].audio_reference.content, "在这座古老的城市里，每一条街道都可能成为生死之间的分界线。")
+        self.assertIsNone(shots[1].audio_reference)
+
+    async def test_parse_script_to_storyboard_normalizes_short_scene_shot_ids_and_backfills_omitted_narration(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1",
+            "source_scene_key": "ep01_scene01",
+            "characters": ["云影"],
+            "storyboard_description": "她停在巷口判断路线。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "停在巷口，警惕观察前方",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影停在巷口观察前方。",
+            "final_video_prompt": "云影停步后继续判断前路。"
+          },
+          {
+            "shot_id": "scene2",
+            "source_scene_key": "ep01_scene01",
+            "characters": ["云影"],
+            "storyboard_description": "她贴墙前行。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Tracking shot"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "贴墙前行，视线快速扫过四周",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影贴墙前行。",
+            "final_video_prompt": "云影沿着石墙快速前进。"
+          },
+          {
+            "shot_id": "scene3",
+            "source_scene_key": "ep01_scene01",
+            "characters": ["云影"],
+            "storyboard_description": "她回头确认身后动静。",
+            "camera_setup": {"shot_size": "CU", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "短暂停步后回头确认身后",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影回头确认身后。",
+            "final_video_prompt": "云影回头查看身后是否有人接近。"
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "第 1 集：测试\n\n【场景 1】\n【环境】街头巷尾\n【画面】云影在曲折的巷道中快速移动，不时回头查看是否有人跟踪。\n【旁白】在这座古老的城市里，每一条街道都可能成为生死之间的分界线。",
+                provider="openai",
+            )
+
+        self.assertEqual([shot.shot_id for shot in shots], ["scene1_shot1", "scene1_shot2", "scene1_shot3"])
+        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertEqual(shots[0].audio_reference.content, "在这座古老的城市里，每一条街道都可能成为生死之间的分界线。")
+        self.assertIsNone(shots[1].audio_reference)
+        self.assertIsNone(shots[2].audio_reference)
 
     async def test_parse_script_to_storyboard_rejects_non_shot_wrapper_object(self):
         response = """
@@ -1574,6 +1840,96 @@ class StoryContextPreparationTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("character_appearance_cache", story["meta"])
             self.assertIn("scene_style_cache", story["meta"])
+
+    async def test_prepare_story_context_runs_cache_extractors_concurrently(self):
+        async with self.session_factory() as session:
+            await repo.save_story(
+                session,
+                "story-ctx-concurrent-refresh",
+                {
+                    "idea": "test",
+                    "genre": "历史",
+                    "tone": "沉稳",
+                    "selected_setting": "江南古镇，石桥，细雨。",
+                    "characters": [
+                        {
+                            "id": "char_li_ming",
+                            "name": "李明",
+                            "role": "主角",
+                            "description": "25岁青年男子，黑色短发，穿着深蓝长衫。",
+                        }
+                    ],
+                    "meta": {},
+                },
+            )
+
+            appearance_started = asyncio.Event()
+            style_started = asyncio.Event()
+            release_both = asyncio.Event()
+            call_order: list[str] = []
+
+            async def _fake_extract_character_appearance(*args, **kwargs):
+                call_order.append("appearance_start")
+                appearance_started.set()
+                await style_started.wait()
+                await release_both.wait()
+                return {
+                    "char_li_ming": {
+                        "body": "young man, short black hair",
+                        "clothing": "dark blue robe",
+                    }
+                }
+
+            async def _fake_extract_scene_style_cache(*args, **kwargs):
+                call_order.append("scene_style_start")
+                style_started.set()
+                await appearance_started.wait()
+                await release_both.wait()
+                return [
+                    {
+                        "keywords": ["bridge"],
+                        "image_extra": "ancient bridge, rain mist",
+                        "video_extra": "ancient bridge, rain mist",
+                    }
+                ]
+
+            with (
+                patch(
+                    "app.services.story_context_service.extract_character_appearance",
+                    new=_fake_extract_character_appearance,
+                ),
+                patch(
+                    "app.services.story_context_service.extract_scene_style_cache",
+                    new=_fake_extract_scene_style_cache,
+                ),
+            ):
+                task = asyncio.create_task(
+                    prepare_story_context(
+                        session,
+                        "story-ctx-concurrent-refresh",
+                        provider="openai",
+                        model="gpt-4o-mini",
+                        api_key="test-key",
+                        base_url="https://example.com/v1",
+                    )
+                )
+                await asyncio.wait_for(appearance_started.wait(), timeout=1)
+                await asyncio.wait_for(style_started.wait(), timeout=1)
+                self.assertCountEqual(call_order, ["appearance_start", "scene_style_start"])
+                self.assertFalse(task.done())
+
+                release_both.set()
+                story, ctx = await asyncio.wait_for(task, timeout=1)
+
+            self.assertIsNotNone(ctx)
+            self.assertEqual(
+                story["meta"]["character_appearance_cache"]["char_li_ming"]["body"],
+                "young man, short black hair",
+            )
+            self.assertEqual(
+                story["meta"]["scene_style_cache"][0]["image_extra"],
+                "ancient bridge, rain mist",
+            )
 
 
 class StoryContextServiceParsingTests(unittest.TestCase):

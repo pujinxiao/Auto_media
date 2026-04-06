@@ -457,43 +457,81 @@ async def prepare_story_context(
     if can_call_llm:
         async with story_lock:
             story = await repo.get_story(db, story_id)
-            if _needs_appearance_cache(story):
-                try:
-                    appearance_cache = dict((story.get("meta") or {}).get("character_appearance_cache") or {})
-                    refresh_identifiers = _appearance_cache_identifiers_to_refresh(story)
-                    extracted = await extract_character_appearance(
-                        story,
-                        provider=provider,
-                        model=model,
-                        api_key=api_key,
-                        base_url=base_url,
-                    )
-                    extracted = {
-                        identifier: value
-                        for identifier, value in extracted.items()
-                        if identifier in refresh_identifiers
-                    }
-                    if extracted:
-                        appearance_cache.update(extracted)
-                        await repo.upsert_story_meta_cache(db, story_id, "character_appearance_cache", appearance_cache)
-                        await _project_visual_dna(db, story_id, story, extracted)
-                        story = await repo.get_story(db, story_id)
-                except Exception:
-                    _logger.exception("Failed to extract character appearance cache for story_id=%s", story_id)
+            refresh_identifiers = _appearance_cache_identifiers_to_refresh(story)
+            needs_appearance_cache = bool(refresh_identifiers)
+            needs_scene_style_cache = _needs_scene_style_cache(story)
 
-            if _needs_scene_style_cache(story):
-                try:
-                    styles = await extract_scene_style_cache(
-                        story,
-                        provider=provider,
-                        model=model,
-                        api_key=api_key,
-                        base_url=base_url,
+            pending_tasks: list[tuple[str, Any]] = []
+            if needs_appearance_cache:
+                pending_tasks.append(
+                    (
+                        "appearance",
+                        extract_character_appearance(
+                            story,
+                            provider=provider,
+                            model=model,
+                            api_key=api_key,
+                            base_url=base_url,
+                        ),
                     )
-                    if styles:
-                        await repo.upsert_story_meta_cache(db, story_id, "scene_style_cache", styles)
-                        story = await repo.get_story(db, story_id)
-                except Exception:
-                    _logger.exception("Failed to extract scene style cache for story_id=%s", story_id)
+                )
+            if needs_scene_style_cache:
+                pending_tasks.append(
+                    (
+                        "scene_style",
+                        extract_scene_style_cache(
+                            story,
+                            provider=provider,
+                            model=model,
+                            api_key=api_key,
+                            base_url=base_url,
+                        ),
+                    )
+                )
+
+            task_results: dict[str, Any] = {}
+            if pending_tasks:
+                gathered_results = await asyncio.gather(
+                    *(task for _, task in pending_tasks),
+                    return_exceptions=True,
+                )
+                for (task_name, _), task_result in zip(pending_tasks, gathered_results):
+                    task_results[task_name] = task_result
+
+            story_updated = False
+
+            appearance_result = task_results.get("appearance")
+            if isinstance(appearance_result, Exception):
+                _logger.exception(
+                    "Failed to extract character appearance cache for story_id=%s",
+                    story_id,
+                    exc_info=appearance_result,
+                )
+            elif appearance_result is not None:
+                appearance_cache = dict((story.get("meta") or {}).get("character_appearance_cache") or {})
+                extracted = {
+                    identifier: value
+                    for identifier, value in appearance_result.items()
+                    if identifier in refresh_identifiers
+                }
+                if extracted:
+                    appearance_cache.update(extracted)
+                    await repo.upsert_story_meta_cache(db, story_id, "character_appearance_cache", appearance_cache)
+                    await _project_visual_dna(db, story_id, story, extracted)
+                    story_updated = True
+
+            scene_style_result = task_results.get("scene_style")
+            if isinstance(scene_style_result, Exception):
+                _logger.exception(
+                    "Failed to extract scene style cache for story_id=%s",
+                    story_id,
+                    exc_info=scene_style_result,
+                )
+            elif scene_style_result:
+                await repo.upsert_story_meta_cache(db, story_id, "scene_style_cache", scene_style_result)
+                story_updated = True
+
+            if story_updated:
+                story = await repo.get_story(db, story_id)
 
     return story, build_story_context(story)

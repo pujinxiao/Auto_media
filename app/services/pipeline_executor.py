@@ -15,7 +15,6 @@ from app.services import story_repository as repo
 from app.core.story_context import (
     StoryContext,
     build_character_reference_anchor,
-    build_clean_character_section,
     build_generation_payload,
     infer_shot_view_hint,
 )
@@ -190,19 +189,9 @@ class PipelineExecutor:
                 "解析分镜中",
                 {"step": "storyboard", "current": 0, "total": 100, "message": "正在解析剧本..."},
             )
-            character_section_override = None
-            if self.story_context and self.story:
-                story_characters = list(self.story.get("characters") or [])
-                if story_characters:
-                    character_section_override = build_clean_character_section(
-                        self.story_context.character_locks,
-                        story_characters,
-                        script=script,
-                    )
             self.shots, _ = await parse_script_to_storyboard(
                 script, provider, model, api_key=llm_api_key, base_url=llm_base_url,
                 character_info=character_info,
-                character_section_override=character_section_override,
             )
 
             if not self.shots:

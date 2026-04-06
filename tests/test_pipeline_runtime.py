@@ -17,6 +17,7 @@ from app.core.pipeline_runtime import (
     resolve_tracking_story_id,
 )
 from app.main import app
+from app.prompts.character import build_character_section
 from app.routers.image import generate_images as generate_single_images, ImageRequest
 from app.routers.pipeline import (
     _resolve_public_base_url,
@@ -986,7 +987,7 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
             any(call.args and "STORYBOARD_TIMING" in str(call.args[0]) for call in info_mock.call_args_list)
         )
 
-    async def test_generate_storyboard_filters_clean_character_section_to_script_mentions(self):
+    async def test_generate_storyboard_reuses_short_character_section_filtering_for_script_mentions(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         async with engine.begin() as conn:
@@ -1030,9 +1031,13 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-        character_section_override = parse_mock.await_args.kwargs["character_section_override"]
-        self.assertIn("Li Ming", character_section_override)
-        self.assertNotIn("A Yue", character_section_override)
+        self.assertNotIn("character_section_override", parse_mock.await_args.kwargs)
+        character_section = build_character_section(
+            parse_mock.await_args.kwargs["character_info"],
+            script=req.script,
+        )
+        self.assertIn("Li Ming", character_section)
+        self.assertNotIn("A Yue", character_section)
 
     async def test_generate_storyboard_filters_using_serialized_script_body_not_character_header(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -1097,9 +1102,13 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-        character_section_override = parse_mock.await_args.kwargs["character_section_override"]
-        self.assertIn("Li Ming", character_section_override)
-        self.assertNotIn("A Yue", character_section_override)
+        self.assertNotIn("character_section_override", parse_mock.await_args.kwargs)
+        character_section = build_character_section(
+            parse_mock.await_args.kwargs["character_info"],
+            script=req.script,
+        )
+        self.assertIn("Li Ming", character_section)
+        self.assertNotIn("A Yue", character_section)
 
     async def test_generate_storyboard_filters_using_character_aliases(self):
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -1175,9 +1184,13 @@ class PipelineStoryContextFallbackTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
-        character_section_override = parse_mock.await_args.kwargs["character_section_override"]
-        self.assertIn("Boss Zhao / 赵掌柜", character_section_override)
-        self.assertNotIn("A Yue", character_section_override)
+        self.assertNotIn("character_section_override", parse_mock.await_args.kwargs)
+        character_section = build_character_section(
+            parse_mock.await_args.kwargs["character_info"],
+            script=req.script,
+        )
+        self.assertIn("Boss Zhao / 赵掌柜", character_section)
+        self.assertNotIn("A Yue", character_section)
 
 
 class ManualPipelineMainlineTests(unittest.IsolatedAsyncioTestCase):

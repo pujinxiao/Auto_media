@@ -1064,9 +1064,135 @@ class ParseStoryboardOverrideTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shots[0].camera_setup.movement, "Slow Dolly in")
         self.assertEqual(shots[0].scene_intensity, "low")
         self.assertEqual(shots[0].scene_position, "establishing")
-        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertIsNone(shots[0].audio_reference)
         self.assertTrue(shots[0].image_prompt)
         self.assertTrue(shots[0].final_video_prompt)
+
+    async def test_parse_script_to_storyboard_filters_invented_audio_and_backfills_single_scene_narration(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1_shot1",
+            "characters": ["云影"],
+            "storyboard_description": "她在巷道中潜行。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "压低身形快速移动",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影在阴影里潜行。",
+            "final_video_prompt": "云影快速移动并警惕四周。",
+            "audio_reference": {
+              "type": "dialogue",
+              "speaker": "云影",
+              "content": "（内心独白）不能让他们发现我！"
+            }
+          },
+          {
+            "shot_id": "scene1_shot2",
+            "characters": ["云影"],
+            "storyboard_description": "刺客逼近。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Tracking shot"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "攀墙躲避",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影准备攀墙躲避。",
+            "final_video_prompt": "云影攀墙躲避追捕。",
+            "audio_reference": {
+              "type": "sfx",
+              "content": "脚步声，喘息声"
+            }
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "第 1 集：测试\n\n【场景 1】\n【环境】街头巷尾\n【画面】云影在曲折的巷道中快速移动，不时回头查看是否有人跟踪。\n【旁白】在这座古老的城市里，每一条街道都可能成为生死之间的分界线。",
+                provider="openai",
+            )
+
+        self.assertEqual(len(shots), 2)
+        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertEqual(shots[0].audio_reference.speaker, "旁白")
+        self.assertEqual(shots[0].audio_reference.content, "在这座古老的城市里，每一条街道都可能成为生死之间的分界线。")
+        self.assertIsNone(shots[1].audio_reference)
+
+    async def test_parse_script_to_storyboard_normalizes_short_scene_shot_ids_and_backfills_omitted_narration(self):
+        response = """
+        [
+          {
+            "shot_id": "scene1",
+            "source_scene_key": "ep01_scene01",
+            "characters": ["云影"],
+            "storyboard_description": "她停在巷口判断路线。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "停在巷口，警惕观察前方",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影停在巷口观察前方。",
+            "final_video_prompt": "云影停步后继续判断前路。"
+          },
+          {
+            "shot_id": "scene2",
+            "source_scene_key": "ep01_scene01",
+            "characters": ["云影"],
+            "storyboard_description": "她贴墙前行。",
+            "camera_setup": {"shot_size": "MS", "camera_angle": "Eye-level", "movement": "Tracking shot"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "贴墙前行，视线快速扫过四周",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影贴墙前行。",
+            "final_video_prompt": "云影沿着石墙快速前进。"
+          },
+          {
+            "shot_id": "scene3",
+            "source_scene_key": "ep01_scene01",
+            "characters": ["云影"],
+            "storyboard_description": "她回头确认身后动静。",
+            "camera_setup": {"shot_size": "CU", "camera_angle": "Eye-level", "movement": "Static"},
+            "visual_elements": {
+              "subject_and_clothing": "云影，黑色紧身衣，面纱",
+              "action_and_expression": "短暂停步后回头确认身后",
+              "environment_and_props": "狭窄街道，石墙，木门",
+              "lighting_and_color": "昏黄街灯"
+            },
+            "image_prompt": "云影回头确认身后。",
+            "final_video_prompt": "云影回头查看身后是否有人接近。"
+          }
+        ]
+        """.strip()
+
+        class FakeProvider:
+            async def complete_messages_with_usage(self, messages, system: str = "", temperature: float = 0.3, **kwargs):
+                return response, {"prompt_tokens": 10, "completion_tokens": 5}
+
+        with patch("app.services.storyboard.get_llm_provider", return_value=FakeProvider()):
+            shots, _ = await parse_script_to_storyboard(
+                "第 1 集：测试\n\n【场景 1】\n【环境】街头巷尾\n【画面】云影在曲折的巷道中快速移动，不时回头查看是否有人跟踪。\n【旁白】在这座古老的城市里，每一条街道都可能成为生死之间的分界线。",
+                provider="openai",
+            )
+
+        self.assertEqual([shot.shot_id for shot in shots], ["scene1_shot1", "scene1_shot2", "scene1_shot3"])
+        self.assertEqual(shots[0].audio_reference.type, "narration")
+        self.assertEqual(shots[0].audio_reference.content, "在这座古老的城市里，每一条街道都可能成为生死之间的分界线。")
+        self.assertIsNone(shots[1].audio_reference)
+        self.assertIsNone(shots[2].audio_reference)
 
     async def test_parse_script_to_storyboard_rejects_non_shot_wrapper_object(self):
         response = """

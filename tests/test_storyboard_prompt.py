@@ -62,6 +62,8 @@ class StoryboardPromptTests(unittest.TestCase):
         rendered = _render_user_template()
         self.assertIn("speaker` must be `旁白` and `type` must be `narration`", rendered)
         self.assertIn("旁白", rendered)
+        self.assertIn("Do NOT invent inner monologue, extra dialogue, or new SFX", SYSTEM_PROMPT)
+        self.assertIn("Never invent inner monologue or extra sound effects", rendered)
 
     def test_user_template_consumes_scene_anchor_props_and_emotion_tags(self):
         rendered = _render_user_template()
@@ -80,6 +82,19 @@ class StoryboardPromptTests(unittest.TestCase):
         self.assertIn("compression over omission", SYSTEM_PROMPT)
         self.assertIn("collectively cover every mandatory item from `【内容覆盖清单】`", rendered)
         self.assertIn("nothing important from the source scene was silently dropped", rendered)
+
+    def test_prompts_require_lean_field_budgets_and_no_full_field_duplication(self):
+        rendered = _render_user_template()
+        self.assertIn("Lean Field Writing", SYSTEM_PROMPT)
+        self.assertIn("Keep every field lean and information-dense", SYSTEM_PROMPT)
+        self.assertIn("Avoid restating the same wardrobe, environment, and lighting details", SYSTEM_PROMPT)
+        self.assertIn("2-3 short Chinese sentences", rendered)
+        self.assertIn("one short anchor phrase", rendered)
+        self.assertIn("1 short phrase only", rendered)
+        self.assertIn("1 short sentence only", rendered)
+        self.assertIn("Do not repeat the full same wardrobe/environment/lighting wording across all text fields", rendered)
+        self.assertIn("Do NOT reduce it to action-only text", SYSTEM_PROMPT)
+        self.assertIn("always retain subject/current outfit and key environment anchor", rendered)
 
     def test_user_template_renders_without_format_key_errors(self):
         rendered = _render_user_template()

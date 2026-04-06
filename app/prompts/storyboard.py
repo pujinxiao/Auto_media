@@ -34,6 +34,13 @@ Convert the provided Chinese Audio-Visual Script into a strict JSON array of exe
 - `environment_and_props` should include only the stable environment elements visible in this shot plus the visible key props.
 - Do not paste the full environment paragraph into every shot.
 
+### Law 0.8: Lean Field Writing
+- Keep every field lean and information-dense. Prefer short clauses over paragraphs.
+- Avoid restating the same wardrobe, environment, and lighting details across `storyboard_description`, `visual_elements`, `image_prompt`, and `final_video_prompt`.
+- Let `visual_elements` hold the anchor details; let `image_prompt` restage the opening frame; let `final_video_prompt` describe only the visible motion after that frame.
+- `mood` should stay as a short phrase, not a sentence.
+- `transition_from_previous` should stay as one short continuity line, not a recap.
+
 ### Law 1: Visible-Only Physical Writing
 - Write only what a camera can see or hear.
 - Convert abstract emotion into visible physical cues.
@@ -43,6 +50,7 @@ Convert the provided Chinese Audio-Visual Script into a strict JSON array of exe
 - Sentence 1 of `storyboard_description` defines the canonical opening frame.
 - `image_prompt` must restage that exact opening frame.
 - `image_prompt` is a static first-frame prompt: include framing and camera angle, but no camera movement and no unfolding action chain.
+- Even when written lean, `image_prompt` must still keep the opening frame's subject identity/current outfit and the key visible environment anchor. Do NOT reduce it to action-only text.
 - `final_video_prompt` must begin from the same opening frame as `image_prompt` and only describe what changes after that frame is established.
 - `final_video_prompt` must include the camera movement method and one core visible action.
 - `last_frame_prompt` must be null for the current single-frame I2V pipeline.
@@ -67,6 +75,7 @@ Convert the provided Chinese Audio-Visual Script into a strict JSON array of exe
 - A dialogue line may appear at most once in the storyboard.
 - `audio_reference.type` must be `dialogue`, `narration`, `sfx`, or null.
 - `audio_reference.speaker` must be the canonical character name, `旁白`, or null.
+- `audio_reference.content` must come from an explicit script line or explicit script sound cue. Do NOT invent inner monologue, extra dialogue, or new SFX.
 - If `audio_reference.type` is `narration`, do not add lip movement unless the narrator is visibly speaking on screen.
 - Dialogue shots usually need 4-5 seconds. Non-dialogue shots usually need 2-4 seconds. Use 5 seconds mainly for dialogue or high-intensity beats.
 - Use `【情感标尺】` as the main mapping from script emotion tags to visible intensity.
@@ -116,16 +125,24 @@ Planning checklist:
    - Do NOT add dedicated transition shots.
 4. Before writing JSON, verify that the 3 planned shots collectively cover every mandatory item from `【内容覆盖清单】`, the visible cause/result chain, and the important spoken beats.
 5. Fill every field. Hard reminders:
-- `storyboard_description`: 2-4 Chinese sentences. Sentence 1 = the opening frame canon; sentence 1 defines the exact opening frame. Sentence 2-4 = only the visible continuation after that frame is established.
+- `storyboard_description`: 2-3 short Chinese sentences. Sentence 1 = the opening frame canon; sentence 1 defines the exact opening frame. Sentence 2-3 = only the visible continuation after that frame is established.
 - Non-opening shots should connect naturally with the previous shot using brief transition words such as `继续`, `接着`, `然后`, `同时`, `缓缓`, `突然`.
-- `image_prompt` must restage that exact opening frame and stay static.
-- `final_video_prompt` starts from the same frame and only adds motion after it; it must name the camera movement method.
+- `visual_elements.subject_and_clothing`: one short anchor phrase with only the visible character identity, current outfit, and explicit facing cue if the script gives one.
+- `visual_elements.action_and_expression`: one short anchor phrase with only 1 core action and 1 visible expression.
+- `visual_elements.environment_and_props`: one short anchor phrase with only the visible stable set pieces and key props in frame.
+- `visual_elements.lighting_and_color`: one short anchor phrase with only the active light logic and dominant color mood.
+- `image_prompt` must restage that exact opening frame and stay static; keep it to 1-3 short sentences, but always retain subject/current outfit and key environment anchor.
+- `final_video_prompt` starts from the same frame and only adds motion after it; it must name the camera movement method and stay within 2-4 short sentences.
 - Every shot MUST fill `characters`; resolve clear pronouns to canonical names; exclude unnamed extras.
 - If a front / side / back facing character orientation cue is explicitly provided, keep it concise. If orientation is not specified, do not invent one.
 - For narration, `speaker` must be `旁白` and `type` must be `narration`.
+- `audio_reference.content` can only quote explicit script dialogue / narration / sound cues. Never invent inner monologue or extra sound effects.
 - Keep the same `【环境锚点】` wording and location identity for shots that stay inside the same source scene.
 - Never paste the full environment paragraph into every shot.
 - `source_scene_key` must follow the SCENE SOURCE MAP when present; reuse the same value for shots that stay inside the same source scene.
+- `mood`: 1 short phrase only.
+- `transition_from_previous`: 1 short sentence only; record only carried-over pose, prop state, layout, and light. Use `null` for the opening shot of a source scene.
+- Do not repeat the full same wardrobe/environment/lighting wording across all text fields.
 6. Final review:
 - no source scene exceeds 3 storyboard shots
 - no dialogue line appears in more than one shot

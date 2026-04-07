@@ -471,29 +471,46 @@ class QualityRunResult:
         }
 
 
-@lru_cache(maxsize=1)
+def _build_compiled_dspy_profiles(raw: Mapping[str, Any]) -> dict[str, DSPyCompiledProfile]:
+    version = str(raw.get("version") or "").strip() or "unknown"
+    profiles: dict[str, DSPyCompiledProfile] = {}
+    for family, payload in dict(raw.get("profiles") or {}).items():
+        if family not in _FAMILY_FLAGS:
+            continue
+        profile_payload = dict(payload or {})
+        profiles[family] = DSPyCompiledProfile(
+            family=family,  # type: ignore[arg-type]
+            version=version,
+            prompt_suffix=str(profile_payload.get("prompt_suffix") or "").strip(),
+            feedback_prefix=str(profile_payload.get("feedback_prefix") or "").strip(),
+        )
+    return profiles
+
+
+@lru_cache(maxsize=8)
+def _load_compiled_dspy_profiles_cached(
+    artifact_path: str,
+    artifact_mtime_ns: int,
+    artifact_size: int,
+) -> dict[str, DSPyCompiledProfile]:
+    del artifact_mtime_ns, artifact_size
+    raw = json.loads(Path(artifact_path).read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ValueError("quality artifacts root must be a JSON object")
+    return _build_compiled_dspy_profiles(raw)
+
+
 def load_compiled_dspy_profiles() -> dict[str, DSPyCompiledProfile]:
     if not _QUALITY_ARTIFACT_PATH.exists():
         return {}
 
     try:
-        raw = json.loads(_QUALITY_ARTIFACT_PATH.read_text(encoding="utf-8"))
-        if not isinstance(raw, Mapping):
-            raise ValueError("quality artifacts root must be a JSON object")
-
-        version = str(raw.get("version") or "").strip() or "unknown"
-        profiles: dict[str, DSPyCompiledProfile] = {}
-        for family, payload in dict(raw.get("profiles") or {}).items():
-            if family not in _FAMILY_FLAGS:
-                continue
-            profile_payload = dict(payload or {})
-            profiles[family] = DSPyCompiledProfile(
-                family=family,  # type: ignore[arg-type]
-                version=version,
-                prompt_suffix=str(profile_payload.get("prompt_suffix") or "").strip(),
-                feedback_prefix=str(profile_payload.get("feedback_prefix") or "").strip(),
-            )
-        return profiles
+        artifact_stat = _QUALITY_ARTIFACT_PATH.stat()
+        return _load_compiled_dspy_profiles_cached(
+            str(_QUALITY_ARTIFACT_PATH),
+            artifact_stat.st_mtime_ns,
+            artifact_stat.st_size,
+        )
     except Exception as exc:
         logger.warning(
             "Failed to load quality artifacts path=%s; continuing without compiled DSPy profiles. error=%s",
@@ -501,6 +518,9 @@ def load_compiled_dspy_profiles() -> dict[str, DSPyCompiledProfile]:
             exc,
         )
         return {}
+
+
+load_compiled_dspy_profiles.cache_clear = _load_compiled_dspy_profiles_cached.cache_clear  # type: ignore[attr-defined]
 
 
 def get_compiled_dspy_profile(family: PromptFamily) -> DSPyCompiledProfile | None:

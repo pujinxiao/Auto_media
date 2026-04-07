@@ -402,6 +402,35 @@ class QualityArtifactLoadingTests(unittest.TestCase):
         warning_mock.assert_called_once()
         self.assertIn("continuing without compiled DSPy profiles", warning_mock.call_args.args[0])
 
+    def test_load_compiled_dspy_profiles_recovers_after_artifact_is_fixed_without_manual_cache_clear(self):
+        with TemporaryDirectory() as tmpdir:
+            artifact_path = Path(tmpdir) / "quality_artifacts.json"
+            artifact_path.write_text('{"version": "broken",', encoding="utf-8")
+
+            with patch("app.services.quality._QUALITY_ARTIFACT_PATH", artifact_path), patch(
+                "app.services.quality.logger.warning"
+            ) as warning_mock:
+                load_compiled_dspy_profiles.cache_clear()
+                try:
+                    first_profiles = load_compiled_dspy_profiles()
+
+                    artifact_path.write_text(
+                        (
+                            '{"version":"test-v1","profiles":'
+                            '{"story_outline":{"prompt_suffix":"TEST_SUFFIX","feedback_prefix":"TEST_PREFIX"}}}'
+                        ),
+                        encoding="utf-8",
+                    )
+
+                    second_profiles = load_compiled_dspy_profiles()
+                finally:
+                    load_compiled_dspy_profiles.cache_clear()
+
+        self.assertEqual(first_profiles, {})
+        self.assertEqual(second_profiles["story_outline"].version, "test-v1")
+        self.assertEqual(second_profiles["story_outline"].prompt_suffix, "TEST_SUFFIX")
+        warning_mock.assert_called_once()
+
 
 class QualityIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_extract_character_appearance_can_return_quality_metadata(self):

@@ -235,7 +235,7 @@ QUALITY_JUDGE_BASE_URL=
 - 后端优先读取请求 Header，其次回退到 `.env`
 - `/media` 会自动挂载本地静态产物目录
 - 若系统 PATH 未包含 Homebrew 目录，可直接在 `.env` 或 shell 中显式指定 `FFMPEG_PATH` / `FFPROBE_PATH`
-- Judge 默认复用当前请求的 LLM 配置；`QUALITY_JUDGE_MODEL` / `QUALITY_JUDGE_API_KEY` / `QUALITY_JUDGE_BASE_URL` 可在保持同一 provider 时单独覆盖，`QUALITY_JUDGE_PROVIDER` 则用于切换到独立 Judge provider；切换后会优先使用 `QUALITY_JUDGE_*`，否则回退到该 provider 在 `.env` 中的默认配置
+- Judge 默认复用当前请求的 LLM 配置；`QUALITY_JUDGE_MODEL` / `QUALITY_JUDGE_API_KEY` / `QUALITY_JUDGE_BASE_URL` 可在保持同一 provider 时单独覆盖，`QUALITY_JUDGE_PROVIDER` 则用于切换到独立 Judge provider；切换后会优先使用 `QUALITY_JUDGE_*`，其中 `QUALITY_JUDGE_API_KEY` / `QUALITY_JUDGE_BASE_URL` 为空时会回退到该 provider 在 `.env` 中的默认配置，而 `QUALITY_JUDGE_MODEL` 不会自动从 `.env` 补默认值
 
 ---
 

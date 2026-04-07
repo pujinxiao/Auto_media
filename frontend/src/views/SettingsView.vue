@@ -11,200 +11,239 @@
         {{ store.useMock ? 'Mock 模式：使用预设数据，无需 API Key' : '真实模式：调用 API 接口，可回退到后端 .env 默认值' }}
       </div>
 
-      <!-- 后端服务 -->
-      <div class="card card-backend">
-        <div class="section-header">
-          <span class="section-icon">⚙️</span>
-          <span class="section-title">后端服务</span>
-        </div>
-        <div class="field">
-          <label>后端地址</label>
-          <div class="input-row">
-            <input v-model="backendUrl" placeholder="留空时，本地开发走代理；部署后走当前站点同源地址" />
-            <button class="test-btn" @click="testBackend" :disabled="testing">
-              {{ backendStatus === 'ok' ? '✓' : backendStatus === 'fail' ? '✗' : testing ? '…' : '测试' }}
-            </button>
-          </div>
-          <span class="hint">留空时，本地开发走 Vite 代理；部署后默认使用当前站点同源地址</span>
-          <span v-if="backendStatus === 'ok'" class="status-ok">连接正常</span>
-          <span v-if="backendStatus === 'fail'" class="status-fail">{{ backendError }}</span>
-        </div>
+      <div class="section-tabs" role="tablist" aria-label="设置分组">
+        <button
+          v-for="section in SETTING_SECTIONS"
+          :key="section.id"
+          type="button"
+          role="tab"
+          class="section-tab"
+          :id="`settings-tab-${section.id}`"
+          :class="{ active: section.id === activeSection.id }"
+          :aria-selected="section.id === activeSection.id"
+          :aria-controls="`settings-panel-${section.id}`"
+          @click="setActiveSection(section.id)"
+        >
+          <span class="section-tab-icon">{{ section.icon }}</span>
+          <span>{{ section.title }}</span>
+        </button>
       </div>
 
-      <!-- 文本生成 -->
-      <div class="card card-llm">
-        <div class="section-header">
-          <span class="section-icon">💬</span>
-          <span class="section-title">文本生成（LLM）</span>
-        </div>
-        <div class="field">
-          <label>服务商</label>
-          <select v-model="llmProvider" @change="onLlmProviderChange" class="select-input">
-            <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Base URL</label>
-          <input v-model="llmBaseUrl" placeholder="https://api.example.com/v1" />
-          <span class="hint">选择服务商后自动填入，可手动修改</span>
-        </div>
-        <div class="field">
-          <label>API Key</label>
-          <div class="input-row">
-            <input v-model="llmApiKey" :type="showLlmKey ? 'text' : 'password'" placeholder="sk-..." />
-            <button class="toggle-btn" @click="showLlmKey = !showLlmKey">{{ showLlmKey ? '隐藏' : '显示' }}</button>
+      <div
+        class="card settings-card"
+        :class="activeSection.cardClass"
+        tabindex="0"
+        @wheel="onSectionWheel"
+        @keydown.down="onSectionKeydown($event, 1)"
+        @keydown.up="onSectionKeydown($event, -1)"
+        @keydown.right="onSectionKeydown($event, 1)"
+        @keydown.left="onSectionKeydown($event, -1)"
+      >
+        <div class="settings-card-head">
+          <div>
+            <div class="section-header">
+              <span class="section-icon">{{ activeSection.icon }}</span>
+              <span class="section-title">{{ activeSection.title }}</span>
+            </div>
+            <p class="section-summary">{{ activeSection.summary }}</p>
           </div>
-          <span class="hint">密钥仅保存在本地浏览器中</span>
-          <span class="hint">留空时，后端会尝试使用 .env 中的默认 LLM 配置</span>
-        </div>
-        <div class="field">
-          <label>模型</label>
-          <select v-model="llmModelSelect" class="select-input">
-            <option v-for="m in currentLlmModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-          </select>
-          <input
-            v-if="llmModelSelect === 'custom'"
-            v-model="llmModelCustom"
-            placeholder="输入模型名称，如 claude-3-5-sonnet-latest"
-            class="model-custom-input"
-          />
+          <span class="scroll-tip">滚轮切换 · {{ activeSectionIndex + 1 }}/{{ SETTING_SECTIONS.length }}</span>
         </div>
 
-        <!-- 高级选项 -->
-        <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
-          <span class="advanced-arrow" :class="{ open: showAdvanced }">▶</span>
-          高级选项
-        </div>
-        <div v-if="showAdvanced" class="advanced-section">
-          <div class="adv-row">
-            <span id="use-script-model-label" class="adv-label">分镜专用配置</span>
-            <label class="toggle-switch">
-              <input type="checkbox" v-model="useScriptModel" @change="onScriptModelToggle" aria-labelledby="use-script-model-label" />
-              <span class="toggle-track" />
-            </label>
-          </div>
-          <span class="hint">启用后，分镜生成步骤将使用下方独立配置（服务商 / API Key / 模型），其余步骤仍使用上方默认 LLM 配置。</span>
-          <template v-if="useScriptModel">
-            <div class="field field-top-gap field-compact">
-              <label for="script-provider">服务商</label>
-              <select id="script-provider" v-model="scriptProvider" @change="onScriptProviderChange" class="select-input">
-                <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
-              </select>
-            </div>
-            <div class="field field-compact">
-              <label for="script-base-url">Base URL</label>
-              <input id="script-base-url" v-model="scriptBaseUrl" placeholder="https://api.example.com/v1" />
-            </div>
-            <div class="field field-compact">
-              <label for="script-api-key">API Key</label>
-              <div class="input-row">
-                <input id="script-api-key" v-model="scriptApiKey" :type="showScriptKey ? 'text' : 'password'" placeholder="sk-..." />
-                <button class="toggle-btn" @click="showScriptKey = !showScriptKey">{{ showScriptKey ? '隐藏' : '显示' }}</button>
+        <transition name="section-fade" mode="out-in">
+          <div
+            :key="activeSection.id"
+            :id="`settings-panel-${activeSection.id}`"
+            class="section-panel"
+            role="tabpanel"
+            :aria-labelledby="`settings-tab-${activeSection.id}`"
+          >
+            <template v-if="activeSection.id === 'backend'">
+              <div class="field">
+                <label>后端地址</label>
+                <div class="input-row">
+                  <input v-model="backendUrl" placeholder="留空时，本地开发走代理；部署后走当前站点同源地址" />
+                  <button class="test-btn" @click="testBackend" :disabled="testing">
+                    {{ backendStatus === 'ok' ? '✓' : backendStatus === 'fail' ? '✗' : testing ? '…' : '测试' }}
+                  </button>
+                </div>
+                <span class="hint">留空时，本地开发走 Vite 代理；部署后默认使用当前站点同源地址</span>
+                <span v-if="backendStatus === 'ok'" class="status-ok">连接正常</span>
+                <span v-if="backendStatus === 'fail'" class="status-fail">{{ backendError }}</span>
               </div>
-              <span class="hint">密钥仅保存在本地浏览器中</span>
-            </div>
-            <div class="field field-compact">
-              <label for="script-model-select">模型</label>
-              <select id="script-model-select" v-model="scriptModelSelect" class="select-input">
-                <option v-for="m in currentScriptModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-              </select>
-              <input
-                v-if="scriptModelSelect === 'custom'"
-                id="script-model-custom"
-                v-model="scriptModelCustom"
-                aria-label="自定义模型名称"
-                placeholder="输入模型名称，如 claude-opus-4-6"
-                class="model-custom-input"
-              />
-            </div>
-          </template>
-        </div>
-      </div>
+            </template>
 
-      <!-- 图片生成 -->
-      <div class="card card-image">
-        <div class="section-header">
-          <span class="section-icon">🖼️</span>
-          <span class="section-title">图片生成</span>
-        </div>
-        <div class="field">
-          <label>服务商</label>
-          <select v-model="imageProvider" @change="onImageProviderChange" class="select-input">
-            <option v-for="p in IMAGE_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Base URL</label>
-          <input v-model="imageBaseUrl" placeholder="https://api.siliconflow.cn/v1" />
-          <span class="hint">兼容 OpenAI /images/generations 接口的服务均可使用</span>
-        </div>
-        <div class="field">
-          <label>API Key</label>
-          <div class="input-row">
-            <input v-model="imageApiKey" :type="showImageKey ? 'text' : 'password'" placeholder="sk-..." />
-            <button class="toggle-btn" @click="showImageKey = !showImageKey">{{ showImageKey ? '隐藏' : '显示' }}</button>
+            <template v-else-if="activeSection.id === 'llm'">
+              <div class="field">
+                <label>服务商</label>
+                <select v-model="llmProvider" @change="onLlmProviderChange" class="select-input">
+                  <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Base URL</label>
+                <input v-model="llmBaseUrl" placeholder="https://api.example.com/v1" />
+                <span class="hint">选择服务商后自动填入，可手动修改</span>
+              </div>
+              <div class="field">
+                <label>API Key</label>
+                <div class="input-row">
+                  <input v-model="llmApiKey" :type="showLlmKey ? 'text' : 'password'" placeholder="sk-..." />
+                  <button class="toggle-btn" @click="showLlmKey = !showLlmKey">{{ showLlmKey ? '隐藏' : '显示' }}</button>
+                </div>
+                <span class="hint">密钥仅保存在本地浏览器中</span>
+                <span class="hint">留空时，后端会尝试使用 .env 中的默认 LLM 配置</span>
+              </div>
+              <div class="field">
+                <label>模型</label>
+                <select v-model="llmModelSelect" class="select-input">
+                  <option v-for="m in currentLlmModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                </select>
+                <input
+                  v-if="llmModelSelect === 'custom'"
+                  v-model="llmModelCustom"
+                  placeholder="输入模型名称，如 claude-3-5-sonnet-latest"
+                  class="model-custom-input"
+                />
+              </div>
+
+              <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+                <span class="advanced-arrow" :class="{ open: showAdvanced }">▶</span>
+                高级选项
+              </div>
+              <div v-if="showAdvanced" class="advanced-section">
+                <div class="adv-row">
+                  <span id="use-script-model-label" class="adv-label">分镜专用配置</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="useScriptModel" @change="onScriptModelToggle" aria-labelledby="use-script-model-label" />
+                    <span class="toggle-track" />
+                  </label>
+                </div>
+                <span class="hint">启用后，分镜生成步骤将使用下方独立配置（服务商 / API Key / 模型），其余步骤仍使用上方默认 LLM 配置。</span>
+                <template v-if="useScriptModel">
+                  <div class="field field-top-gap field-compact">
+                    <label for="script-provider">服务商</label>
+                    <select id="script-provider" v-model="scriptProvider" @change="onScriptProviderChange" class="select-input">
+                      <option v-for="p in LLM_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                    </select>
+                  </div>
+                  <div class="field field-compact">
+                    <label for="script-base-url">Base URL</label>
+                    <input id="script-base-url" v-model="scriptBaseUrl" placeholder="https://api.example.com/v1" />
+                  </div>
+                  <div class="field field-compact">
+                    <label for="script-api-key">API Key</label>
+                    <div class="input-row">
+                      <input id="script-api-key" v-model="scriptApiKey" :type="showScriptKey ? 'text' : 'password'" placeholder="sk-..." />
+                      <button class="toggle-btn" @click="showScriptKey = !showScriptKey">{{ showScriptKey ? '隐藏' : '显示' }}</button>
+                    </div>
+                    <span class="hint">密钥仅保存在本地浏览器中</span>
+                  </div>
+                  <div class="field field-compact">
+                    <label for="script-model-select">模型</label>
+                    <select id="script-model-select" v-model="scriptModelSelect" class="select-input">
+                      <option v-for="m in currentScriptModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                    </select>
+                    <input
+                      v-if="scriptModelSelect === 'custom'"
+                      id="script-model-custom"
+                      v-model="scriptModelCustom"
+                      aria-label="自定义模型名称"
+                      placeholder="输入模型名称，如 claude-opus-4-6"
+                      class="model-custom-input"
+                    />
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <template v-else-if="activeSection.id === 'image'">
+              <div class="field">
+                <label>服务商</label>
+                <select v-model="imageProvider" @change="onImageProviderChange" class="select-input">
+                  <option v-for="p in IMAGE_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Base URL</label>
+                <input v-model="imageBaseUrl" placeholder="https://api.siliconflow.cn/v1" />
+                <span class="hint">兼容 OpenAI /images/generations 接口的服务均可使用</span>
+              </div>
+              <div class="field">
+                <label>API Key</label>
+                <div class="input-row">
+                  <input v-model="imageApiKey" :type="showImageKey ? 'text' : 'password'" placeholder="sk-..." />
+                  <button class="toggle-btn" @click="showImageKey = !showImageKey">{{ showImageKey ? '隐藏' : '显示' }}</button>
+                </div>
+                <span class="hint">密钥仅保存在本地浏览器中</span>
+              </div>
+              <div class="field">
+                <label>模型</label>
+                <select v-if="!(currentImageModels.length === 1 && currentImageModels[0].id === 'custom')" v-model="imageModelSelect" class="select-input">
+                  <option v-for="m in currentImageModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                </select>
+                <input
+                  v-if="imageModelSelect === 'custom'"
+                  v-model="imageModelCustom"
+                  :placeholder="imageProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 black-forest-labs/FLUX.1-schnell'"
+                  class="model-custom-input"
+                />
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="field">
+                <label>服务商</label>
+                <select v-model="videoProvider" @change="onVideoProviderChange" class="select-input">
+                  <option v-for="p in VIDEO_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Base URL</label>
+                <input v-model="videoBaseUrl" placeholder="https://dashscope.aliyuncs.com/api/v1" />
+                <span class="hint">{{ videoProvider === 'kling' ? 'Kling 图生视频接口地址' : 'DashScope 图生视频接口地址' }}</span>
+              </div>
+              <div class="field">
+                <label>API Key</label>
+                <div class="input-row">
+                  <input v-model="videoApiKey" :type="showVideoKey ? 'text' : 'password'" :placeholder="videoProvider === 'kling' ? 'access_key_id:secret_key' : 'sk-...'" />
+                  <button class="toggle-btn" @click="showVideoKey = !showVideoKey">{{ showVideoKey ? '隐藏' : '显示' }}</button>
+                </div>
+                <span v-if="videoProvider === 'kling'" class="hint">Kling 格式：access_key_id:secret_key（冒号连接两个字段）</span>
+                <span v-else-if="videoProvider === 'minimax'" class="hint">MiniMax 开放平台获取 API Key，填入后直接使用</span>
+                <span v-else class="hint">密钥仅保存在本地浏览器中</span>
+              </div>
+              <div class="field">
+                <label>模型</label>
+                <select v-if="!(currentVideoModels.length === 1 && currentVideoModels[0].id === 'custom')" v-model="videoModelSelect" class="select-input">
+                  <option v-for="m in currentVideoModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                </select>
+                <input
+                  v-if="videoModelSelect === 'custom'"
+                  v-model="videoModelCustom"
+                  :placeholder="videoProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 wan2.1-i2v-turbo'"
+                  class="model-custom-input"
+                />
+              </div>
+            </template>
           </div>
-          <span class="hint">密钥仅保存在本地浏览器中</span>
-        </div>
-        <div class="field">
-          <label>模型</label>
-          <select v-if="!(currentImageModels.length === 1 && currentImageModels[0].id === 'custom')" v-model="imageModelSelect" class="select-input">
-            <option v-for="m in currentImageModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-          </select>
-          <input
-            v-if="imageModelSelect === 'custom'"
-            v-model="imageModelCustom"
-            :placeholder="imageProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 black-forest-labs/FLUX.1-schnell'"
-            class="model-custom-input"
-          />
-        </div>
-      </div>
+        </transition>
 
-      <!-- 视频生成 -->
-      <div class="card card-video">
-        <div class="section-header">
-          <span class="section-icon">🎬</span>
-          <span class="section-title">视频生成</span>
-        </div>
-        <div class="field">
-          <label>服务商</label>
-          <select v-model="videoProvider" @change="onVideoProviderChange" class="select-input">
-            <option v-for="p in VIDEO_PROVIDERS" :key="p.id" :value="p.id">{{ p.label }}</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Base URL</label>
-          <input v-model="videoBaseUrl" placeholder="https://dashscope.aliyuncs.com/api/v1" />
-          <span class="hint">{{ videoProvider === 'kling' ? 'Kling 图生视频接口地址' : 'DashScope 图生视频接口地址' }}</span>
-        </div>
-        <div class="field">
-          <label>API Key</label>
-          <div class="input-row">
-            <input v-model="videoApiKey" :type="showVideoKey ? 'text' : 'password'" :placeholder="videoProvider === 'kling' ? 'access_key_id:secret_key' : 'sk-...'" />
-            <button class="toggle-btn" @click="showVideoKey = !showVideoKey">{{ showVideoKey ? '隐藏' : '显示' }}</button>
+        <div class="settings-card-footer">
+          <div class="section-dots" aria-hidden="true">
+            <span
+              v-for="section in SETTING_SECTIONS"
+              :key="section.id"
+              class="section-dot"
+              :class="{ active: section.id === activeSection.id }"
+            />
           </div>
-          <span v-if="videoProvider === 'kling'" class="hint">Kling 格式：access_key_id:secret_key（冒号连接两个字段）</span>
-          <span v-else-if="videoProvider === 'minimax'" class="hint">MiniMax 开放平台获取 API Key，填入后直接使用</span>
-          <span v-else class="hint">密钥仅保存在本地浏览器中</span>
-        </div>
-        <div class="field">
-          <label>模型</label>
-          <select v-if="!(currentVideoModels.length === 1 && currentVideoModels[0].id === 'custom')" v-model="videoModelSelect" class="select-input">
-            <option v-for="m in currentVideoModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-          </select>
-          <input
-            v-if="videoModelSelect === 'custom'"
-            v-model="videoModelCustom"
-            :placeholder="videoProvider === 'doubao' ? '输入端点 ID，如 ep-xxxxxxxx' : '输入模型名称，如 wan2.1-i2v-turbo'"
-            class="model-custom-input"
-          />
+          <div class="btn-row">
+            <button class="save-btn" @click="save">保存设置</button>
+          </div>
+          <div v-if="saved" class="saved-tip">已保存 ✓</div>
         </div>
       </div>
-
-      <div class="btn-row">
-        <button class="save-btn" @click="save">保存设置</button>
-      </div>
-      <div v-if="saved" class="saved-tip">已保存 ✓</div>
     </div>
   </div>
 </template>
@@ -217,6 +256,17 @@ import { resolveBackendHealthUrl } from '../utils/backend.js'
 
 const router = useRouter()
 const store = useSettingsStore()
+
+const SETTING_SECTIONS = [
+  { id: 'backend', title: '后端服务', icon: '⚙️', summary: '管理服务入口与连通性检测。', cardClass: 'card-backend' },
+  { id: 'llm', title: '文本生成（LLM）', icon: '💬', summary: '配置默认文本模型，以及可选的分镜专用模型。', cardClass: 'card-llm' },
+  { id: 'image', title: '图片生成', icon: '🖼️', summary: '管理图像生成服务、密钥与模型选择。', cardClass: 'card-image' },
+  { id: 'video', title: '视频生成', icon: '🎬', summary: '配置图生视频服务商、接口地址与模型。', cardClass: 'card-video' },
+]
+
+const activeSectionIndex = ref(0)
+const activeSection = computed(() => SETTING_SECTIONS[activeSectionIndex.value] || SETTING_SECTIONS[0])
+let lastSectionSwitchAt = 0
 
 // 后端
 const backendUrl    = ref(store.backendUrl)
@@ -315,6 +365,59 @@ const videoModelSelect = ref(_vs)
 const videoModelCustom = ref(_vc)
 
 const saved = ref(false)
+
+function setActiveSection(sectionId) {
+  const nextIndex = SETTING_SECTIONS.findIndex(section => section.id === sectionId)
+  if (nextIndex >= 0) activeSectionIndex.value = nextIndex
+}
+
+function shiftActiveSection(delta) {
+  const nextIndex = Math.min(
+    SETTING_SECTIONS.length - 1,
+    Math.max(0, activeSectionIndex.value + delta),
+  )
+  if (nextIndex === activeSectionIndex.value) return
+  activeSectionIndex.value = nextIndex
+}
+
+function isSectionShortcutTarget(target, currentTarget) {
+  return (
+    target instanceof Element &&
+    target !== currentTarget &&
+    !!target.closest('input, select, textarea, button, a, [contenteditable="true"]')
+  )
+}
+
+function onSectionWheel(event) {
+  if (event.ctrlKey) return
+  if (isSectionShortcutTarget(event.target, event.currentTarget)) return
+
+  const primaryDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+  if (Math.abs(primaryDelta) < 12) return
+
+  const now = Date.now()
+  if (now - lastSectionSwitchAt < 280) {
+    event.preventDefault()
+    return
+  }
+
+  const previousIndex = activeSectionIndex.value
+  shiftActiveSection(primaryDelta > 0 ? 1 : -1)
+  if (activeSectionIndex.value !== previousIndex) {
+    lastSectionSwitchAt = now
+    event.preventDefault()
+  }
+}
+
+function onSectionKeydown(event, delta) {
+  if (isSectionShortcutTarget(event.target, event.currentTarget)) return
+
+  const previousIndex = activeSectionIndex.value
+  shiftActiveSection(delta)
+  if (activeSectionIndex.value !== previousIndex) {
+    event.preventDefault()
+  }
+}
 
 function onLlmProviderChange() {
   const p = LLM_PROVIDERS.find(p => p.id === llmProvider.value)

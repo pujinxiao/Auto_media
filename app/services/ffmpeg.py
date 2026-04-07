@@ -10,6 +10,7 @@ import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from app.paths import IMAGE_DIR, MEDIA_DIR, VIDEO_DIR
 
@@ -97,6 +98,9 @@ async def _extract_frame(video_path: str, output_path: str, *frame_args: str) ->
         raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.unlink(missing_ok=True)
     ffmpeg_bin = resolve_media_binary("ffmpeg")
 
     cmd = [
@@ -121,6 +125,10 @@ async def _extract_frame(video_path: str, output_path: str, *frame_args: str) ->
         err_msg = stderr.decode(errors="replace")
         logger.error("FFmpeg 提取帧失败 (code %d): %s", proc.returncode, err_msg)
         raise RuntimeError(f"FFmpeg 提取帧失败: {err_msg}")
+
+    if not output_file.is_file() or output_file.stat().st_size <= 0:
+        logger.error("FFmpeg 提取帧未生成有效输出文件: %s", output_path)
+        raise RuntimeError(f"FFmpeg 提取帧未生成有效输出文件: {output_path}")
 
     logger.info("FFmpeg 提取单帧完成: %s", output_path)
     return output_path
@@ -372,9 +380,14 @@ async def concat_videos(
 
 def url_to_local_path(url: str, base_url: str) -> str:
     """将 URL 转换为本地媒体绝对路径。"""
-    path = url
-    if base_url and path.startswith(base_url):
-        path = path[len(base_url):]
+    path = str(url or "").strip()
+    normalized_base_url = str(base_url or "").strip().rstrip("/")
+    if normalized_base_url and path.startswith(normalized_base_url):
+        path = path[len(normalized_base_url):]
+    else:
+        parsed = urlsplit(path)
+        if (parsed.scheme or parsed.netloc) and parsed.path.startswith("/media/"):
+            path = parsed.path
     normalized = f"/{path.lstrip('/')}"
     if normalized.startswith("/media/"):
         return str((MEDIA_DIR.parent / normalized.lstrip("/")).resolve(strict=False))

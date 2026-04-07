@@ -536,18 +536,27 @@ def _resolve_judge_provider_config(
     base_url: str,
 ) -> tuple[str, str | None, str, str]:
     primary_provider = str(provider or settings.default_llm_provider or "").strip().lower()
-    judge_provider = str(settings.quality_judge_provider or primary_provider or "").strip().lower()
+    primary_model = str(model or "").strip() or None
+    primary_api_key = str(api_key or "").strip()
+    primary_base_url = str(base_url or "").strip()
+
+    configured_judge_provider = str(settings.quality_judge_provider or "").strip().lower()
+    configured_judge_model = str(settings.quality_judge_model or "").strip() or None
+    configured_judge_api_key = str(settings.quality_judge_api_key or "").strip()
+    configured_judge_base_url = str(settings.quality_judge_base_url or "").strip()
+
+    judge_provider = configured_judge_provider or primary_provider or ""
     _, _, default_judge_api_key, default_judge_base_url = resolve_default_quality_llm_config(provider=judge_provider)
     inherit_primary_config = judge_provider == primary_provider
 
     if inherit_primary_config:
-        judge_model = str(settings.quality_judge_model or model or "").strip() or None
-        judge_api_key = str(settings.quality_judge_api_key or api_key or default_judge_api_key or "").strip()
-        judge_base_url = str(settings.quality_judge_base_url or base_url or default_judge_base_url or "").strip()
+        judge_model = configured_judge_model or primary_model
+        judge_api_key = configured_judge_api_key or primary_api_key or str(default_judge_api_key or "").strip()
+        judge_base_url = configured_judge_base_url or primary_base_url or str(default_judge_base_url or "").strip()
     else:
-        judge_model = str(settings.quality_judge_model or "").strip() or None
-        judge_api_key = str(settings.quality_judge_api_key or default_judge_api_key or "").strip()
-        judge_base_url = str(settings.quality_judge_base_url or default_judge_base_url or "").strip()
+        judge_model = configured_judge_model
+        judge_api_key = configured_judge_api_key or str(default_judge_api_key or "").strip()
+        judge_base_url = configured_judge_base_url or str(default_judge_base_url or "").strip()
 
     return judge_provider, judge_model, judge_api_key, judge_base_url
 

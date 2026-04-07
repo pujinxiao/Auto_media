@@ -315,10 +315,10 @@ class QualityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.services.quality.settings.quality_judge_enabled", True),
             patch("app.services.quality.settings.quality_judge_shadow_mode", False),
-            patch("app.services.quality.settings.quality_judge_provider", "openai"),
-            patch("app.services.quality.settings.quality_judge_model", ""),
-            patch("app.services.quality.settings.quality_judge_api_key", ""),
-            patch("app.services.quality.settings.quality_judge_base_url", ""),
+            patch("app.services.quality.settings.quality_judge_provider", "  openai  "),
+            patch("app.services.quality.settings.quality_judge_model", "   "),
+            patch("app.services.quality.settings.quality_judge_api_key", "   "),
+            patch("app.services.quality.settings.quality_judge_base_url", "   "),
             patch("app.services.quality.settings.openai_api_key", "openai-judge-key"),
             patch("app.services.quality.settings.openai_base_url", "https://openai.example.com/v1"),
             patch("app.services.quality.get_llm_provider", return_value=FakeJudgeLLM()) as provider_mock,
@@ -339,6 +339,47 @@ class QualityRuntimeTests(unittest.IsolatedAsyncioTestCase):
             model=None,
             api_key="openai-judge-key",
             base_url="https://openai.example.com/v1",
+        )
+
+    async def test_quality_judge_whitespace_config_falls_back_to_primary_request_config(self):
+        class FakeJudgeLLM:
+            async def complete_with_usage(self, *_args, **_kwargs):
+                return (
+                    '{"passed": true, "overall_score": 4.1, "summary": "通过", '
+                    '"issues": [], "feedback_instructions": [], "criteria": ['
+                    '{"name": "logline_and_conflict", "score": 4, "passed": true, "reason": ""}, '
+                    '{"name": "beat_progression", "score": 4, "passed": true, "reason": ""}, '
+                    '{"name": "scene_stability", "score": 4, "passed": true, "reason": ""}, '
+                    '{"name": "cross_episode_cohesion", "score": 4, "passed": true, "reason": ""}'
+                    "]}",
+                    {"prompt_tokens": 6, "completion_tokens": 2},
+                )
+
+        with (
+            patch("app.services.quality.settings.quality_judge_enabled", True),
+            patch("app.services.quality.settings.quality_judge_shadow_mode", False),
+            patch("app.services.quality.settings.quality_judge_provider", "   "),
+            patch("app.services.quality.settings.quality_judge_model", "   "),
+            patch("app.services.quality.settings.quality_judge_api_key", "   "),
+            patch("app.services.quality.settings.quality_judge_base_url", "   "),
+            patch("app.services.quality.get_llm_provider", return_value=FakeJudgeLLM()) as provider_mock,
+        ):
+            result = await run_quality_judge(
+                family="story_outline",
+                candidate_payload={"episodes": []},
+                provider="claude",
+                model="claude-sonnet-4-6",
+                api_key="claude-primary-key",
+                base_url="https://anthropic.example.com",
+            )
+
+        self.assertFalse(result.skipped)
+        self.assertTrue(result.passed)
+        provider_mock.assert_called_once_with(
+            "claude",
+            model="claude-sonnet-4-6",
+            api_key="claude-primary-key",
+            base_url="https://anthropic.example.com",
         )
 
 
@@ -593,3 +634,50 @@ class QualityIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["quality"]["family"], "story_outline")
         self.assertEqual(saved_payloads[-1]["meta"]["quality_runs"]["story_outline"]["enabled"], True)
+
+    async def test_generate_outline_skips_persistence_when_db_is_none(self):
+        validated_outline = {
+            "meta": {"title": "标题", "genre": "类型", "episodes": 6},
+            "characters": [{"id": "char_1", "name": "李明", "role": "主角", "description": "青年"}],
+            "relationships": [],
+            "outline": [
+                {
+                    "episode": 1,
+                    "title": "第一集",
+                    "summary": "摘要",
+                    "beats": ["冲突建立"],
+                    "scene_list": ["夜 外 茶馆门口"],
+                }
+            ],
+        }
+
+        with (
+            patch("app.services.story_llm._make_client", return_value=object()),
+            patch("app.services.story_llm.repo.get_story", new=AsyncMock()) as get_story_mock,
+            patch("app.services.story_llm.repo.save_story", new=AsyncMock()) as save_story_mock,
+            patch("app.services.story_llm.repo.invalidate_story_consistency_cache", new=AsyncMock()) as invalidate_mock,
+            patch(
+                "app.services.story_llm.run_quality_guarded_generation",
+                new=AsyncMock(
+                    return_value=(
+                        validated_outline,
+                        {"prompt_tokens": 12, "completion_tokens": 3},
+                        {"enabled": True, "family": "story_outline"},
+                    )
+                ),
+            ),
+        ):
+            result = await generate_outline(
+                "story-quality-no-db",
+                "世界观设定",
+                db=None,
+                api_key="test-key",
+                provider="claude",
+                model="claude-sonnet-4-6",
+            )
+
+        get_story_mock.assert_not_awaited()
+        save_story_mock.assert_not_awaited()
+        invalidate_mock.assert_not_awaited()
+        self.assertEqual(result["outline"], validated_outline["outline"])
+        self.assertEqual(result["meta"]["quality_runs"]["story_outline"]["family"], "story_outline")

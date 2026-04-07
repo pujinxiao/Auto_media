@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 // Mock 改为显式开启：只有设置 VITE_ENABLE_MOCK=true 时才启用。
 // 这样浏览器本地未填写 llmApiKey 时，前端不会抢先进入 Mock，后端仍可使用 .env 默认凭证。
 const MOCK_ENABLED = import.meta.env.VITE_ENABLE_MOCK === 'true'
+const DEFAULT_UI_IMAGE_PROVIDER = 'siliconflow'
+const DEFAULT_UI_VIDEO_PROVIDER = 'dashscope'
 
 function shouldSendLlmProvider(state) {
   const provider = String(state.llmProvider || '').trim()
@@ -23,26 +25,22 @@ function hasStoredSetting(key) {
 }
 
 function shouldSendImageConfig(state) {
+  const provider = String(state.imageProvider || '').trim()
   return (
-    hasStoredSetting('imageProvider')
-    || hasStoredSetting('imageApiKey')
-    || hasStoredSetting('imageBaseUrl')
-    || hasStoredSetting('imageModel')
     || !!String(state.imageApiKey || '').trim()
     || !!String(state.imageBaseUrl || '').trim()
     || !!String(state.imageModel || '').trim()
+    || (hasStoredSetting('imageProvider') && !!provider && provider !== DEFAULT_UI_IMAGE_PROVIDER)
   )
 }
 
 function shouldSendVideoConfig(state) {
+  const provider = String(state.videoProvider || '').trim()
   return (
-    hasStoredSetting('videoProvider')
-    || hasStoredSetting('videoApiKey')
-    || hasStoredSetting('videoBaseUrl')
-    || hasStoredSetting('videoModel')
     || !!String(state.videoApiKey || '').trim()
     || !!String(state.videoBaseUrl || '').trim()
     || !!String(state.videoModel || '').trim()
+    || (hasStoredSetting('videoProvider') && !!provider && provider !== DEFAULT_UI_VIDEO_PROVIDER)
   )
 }
 

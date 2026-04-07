@@ -1086,7 +1086,7 @@ async def analyze_idea(idea: str, genre: str, tone: str, db: AsyncSession, api_k
     }
 
 
-async def generate_outline(story_id: str, selected_setting: str, db: AsyncSession, api_key: str = "", base_url: str = "", provider: str = "", model: str = "") -> dict:
+async def generate_outline(story_id: str, selected_setting: str, db: AsyncSession | None, api_key: str = "", base_url: str = "", provider: str = "", model: str = "") -> dict:
     if _should_use_dev_mock(api_key, "大纲生成"):
         return await mock_generate_outline(story_id, selected_setting, db=db)
 
@@ -1096,7 +1096,7 @@ async def generate_outline(story_id: str, selected_setting: str, db: AsyncSessio
 
     async with lock:
         try:
-            existing_story = await repo.get_story(db, story_id) if hasattr(db, "execute") else {}
+            existing_story = await repo.get_story(db, story_id) if db is not None else {}
 
             async def _generate_outline_candidate(prompt_suffix: str, _attempt: int) -> tuple[dict[str, Any], dict[str, Any]]:
                 usage_parts: list[dict[str, int] | None] = []

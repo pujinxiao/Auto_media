@@ -476,20 +476,31 @@ def load_compiled_dspy_profiles() -> dict[str, DSPyCompiledProfile]:
     if not _QUALITY_ARTIFACT_PATH.exists():
         return {}
 
-    raw = json.loads(_QUALITY_ARTIFACT_PATH.read_text(encoding="utf-8"))
-    version = str(raw.get("version") or "").strip() or "unknown"
-    profiles: dict[str, DSPyCompiledProfile] = {}
-    for family, payload in dict(raw.get("profiles") or {}).items():
-        if family not in _FAMILY_FLAGS:
-            continue
-        profile_payload = dict(payload or {})
-        profiles[family] = DSPyCompiledProfile(
-            family=family,  # type: ignore[arg-type]
-            version=version,
-            prompt_suffix=str(profile_payload.get("prompt_suffix") or "").strip(),
-            feedback_prefix=str(profile_payload.get("feedback_prefix") or "").strip(),
+    try:
+        raw = json.loads(_QUALITY_ARTIFACT_PATH.read_text(encoding="utf-8"))
+        if not isinstance(raw, Mapping):
+            raise ValueError("quality artifacts root must be a JSON object")
+
+        version = str(raw.get("version") or "").strip() or "unknown"
+        profiles: dict[str, DSPyCompiledProfile] = {}
+        for family, payload in dict(raw.get("profiles") or {}).items():
+            if family not in _FAMILY_FLAGS:
+                continue
+            profile_payload = dict(payload or {})
+            profiles[family] = DSPyCompiledProfile(
+                family=family,  # type: ignore[arg-type]
+                version=version,
+                prompt_suffix=str(profile_payload.get("prompt_suffix") or "").strip(),
+                feedback_prefix=str(profile_payload.get("feedback_prefix") or "").strip(),
+            )
+        return profiles
+    except Exception as exc:
+        logger.warning(
+            "Failed to load quality artifacts path=%s; continuing without compiled DSPy profiles. error=%s",
+            _QUALITY_ARTIFACT_PATH,
+            exc,
         )
-    return profiles
+        return {}
 
 
 def get_compiled_dspy_profile(family: PromptFamily) -> DSPyCompiledProfile | None:
@@ -524,11 +535,20 @@ def _resolve_judge_provider_config(
     api_key: str,
     base_url: str,
 ) -> tuple[str, str | None, str, str]:
-    default_provider = str(provider or settings.default_llm_provider or "").strip().lower()
-    judge_provider = str(settings.quality_judge_provider or default_provider or "").strip().lower()
-    judge_model = str(settings.quality_judge_model or model or "").strip() or None
-    judge_api_key = str(settings.quality_judge_api_key or api_key or "").strip()
-    judge_base_url = str(settings.quality_judge_base_url or base_url or "").strip()
+    primary_provider = str(provider or settings.default_llm_provider or "").strip().lower()
+    judge_provider = str(settings.quality_judge_provider or primary_provider or "").strip().lower()
+    _, _, default_judge_api_key, default_judge_base_url = resolve_default_quality_llm_config(provider=judge_provider)
+    inherit_primary_config = judge_provider == primary_provider
+
+    if inherit_primary_config:
+        judge_model = str(settings.quality_judge_model or model or "").strip() or None
+        judge_api_key = str(settings.quality_judge_api_key or api_key or default_judge_api_key or "").strip()
+        judge_base_url = str(settings.quality_judge_base_url or base_url or default_judge_base_url or "").strip()
+    else:
+        judge_model = str(settings.quality_judge_model or "").strip() or None
+        judge_api_key = str(settings.quality_judge_api_key or default_judge_api_key or "").strip()
+        judge_base_url = str(settings.quality_judge_base_url or default_judge_base_url or "").strip()
+
     return judge_provider, judge_model, judge_api_key, judge_base_url
 
 

@@ -1335,21 +1335,28 @@ async def polish_visual_style(
     response_text = resp.choices[0].message.content
     usage = getattr(resp, "usage", None)
     polished_style = ""
+    parsed_successfully = False
     try:
         data = _parse_json(response_text)
+        if not isinstance(data, dict):
+            raise ValueError("视觉风格整理响应不是 JSON 对象")
         polished_style = _normalize_rewrite_text(data.get("polished_style"))
         if not polished_style:
             polished_style = _build_fallback_visual_style_result(
                 description=normalized_description,
                 current_style=normalized_current,
             )
-    except Exception:
+        parsed_successfully = True
+    except Exception as exc:
+        logger.exception("Failed to parse visual style response, falling back to synthesized style")
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
         polished_style = _build_fallback_visual_style_result(
             description=normalized_description,
             current_style=normalized_current,
         )
 
-    tracker.record_success(usage=usage, response_text=response_text)
+    if parsed_successfully:
+        tracker.record_success(usage=usage, response_text=response_text)
     return {
         "description": normalized_description,
         "current_style": normalized_current,

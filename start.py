@@ -29,8 +29,8 @@ PROJECT_BINARY_ROOT = ROOT / ".ffmpeg-tools" / "node_modules"
 
 
 def _binary_candidates(binary_name):
-    if platform.system().lower() == "windows" and not binary_name.lower().endswith(".exe"):
-        return (binary_name, f"{binary_name}.exe")
+    if platform.system().lower() == "windows" and not binary_name.lower().endswith((".exe", ".cmd", ".bat")):
+        return (binary_name, f"{binary_name}.exe", f"{binary_name}.cmd", f"{binary_name}.bat")
     return (binary_name,)
 
 

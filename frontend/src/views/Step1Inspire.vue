@@ -172,7 +172,7 @@ const canRewrite = computed(() => idea.value.trim().length >= 10 && rewriteInstr
 const canUndoRewrite = computed(() => rewriteSnapshots.value.length > 0)
 const canRestoreOriginal = computed(() => Boolean(originalIdea.value.trim()) && idea.value.trim() !== originalIdea.value.trim())
 const hasPendingRewrite = computed(() => Boolean(pendingRewriteIdea.value.trim()))
-const canSubmit = computed(() => Boolean(idea.value.trim()) && isGenreValid.value)
+const canSubmit = computed(() => Boolean(idea.value.trim()) && isGenreValid.value && !hasPendingRewrite.value)
 
 watch(idea, (val) => {
   store.input.idea = val
@@ -288,11 +288,13 @@ function applyPendingRewrite() {
   })
 
   rewriteError.value = ''
+  error.value = ''
   idea.value = rewrittenIdea
   clearPendingRewrite()
 }
 
 function discardPendingRewrite() {
+  error.value = ''
   rewriteError.value = ''
   rewriteGuardrailNotice.value = ''
   clearPendingRewrite()
@@ -301,6 +303,8 @@ function discardPendingRewrite() {
 async function runRewrite() {
   const currentIdea = idea.value.trim()
   const instruction = rewriteInstruction.value.trim()
+  const currentGenre = normalizedGenre.value
+  const currentOriginalIdea = originalIdea.value.trim() || currentIdea
 
   if (!currentIdea) {
     rewriteError.value = '请先输入灵感，再让 AI 帮你改写。'
@@ -324,15 +328,24 @@ async function runRewrite() {
   try {
     const round = rewriteHistory.value.length + 1
     const result = await rewriteIdea(
-      originalIdea.value.trim() || currentIdea,
+      currentOriginalIdea,
       currentIdea,
       instruction,
       round,
-      normalizedGenre.value,
+      currentGenre,
     )
     const rewrittenIdea = String(result.rewritten_idea || '').trim()
     if (!rewrittenIdea) {
       rewriteError.value = 'AI 暂未返回可用改写，请重试。'
+      return
+    }
+    if (
+      idea.value.trim() !== currentIdea
+      || normalizedGenre.value !== currentGenre
+      || rewriteInstruction.value.trim() !== instruction
+      || (originalIdea.value.trim() || idea.value.trim()) !== currentOriginalIdea
+    ) {
+      rewriteError.value = '这次改写结果已过期，你在等待期间更新了灵感、题材或修改要求，请重新生成预览。'
       return
     }
 
@@ -360,6 +373,10 @@ async function submit() {
   const inputIdea = idea.value.trim()
   const inputGenre = normalizedGenre.value
   error.value = ''
+  if (hasPendingRewrite.value) {
+    error.value = '你有一版待确认的短剧感增强版预览，请先选择“采用这版”或“保留原文”。'
+    return
+  }
   if (!ensureGenreConstraint('submit')) {
     return
   }

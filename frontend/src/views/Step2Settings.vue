@@ -151,7 +151,7 @@ const restartWorldBuildingButtonLabel = computed(() => (
   activeAction.value === 'restart' ? '重新构建中...' : '重新构建世界观'
 ))
 const restartConfirmMessage = computed(() => {
-  const parts = ['这会清空当前世界观问答']
+  const parts = ['当前世界观问答']
   if (store.meta) parts.push('已生成的大纲')
   if (store.scenes?.length) parts.push('已生成的剧本')
   return `继续后将从第 1 轮重新开始，并清空${parts.join('、')}。此操作不可撤销，确定继续吗？`

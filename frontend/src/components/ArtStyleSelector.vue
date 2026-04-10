@@ -140,15 +140,23 @@ function restoreDefaultStyle() {
 
 async function handlePolishStyle() {
   const description = normalizedLocalStyle.value
+  const confirmedStyleAtRequest = String(store.artStyle || '').trim()
   if (!description || polishing.value) return
 
   resetTransientState()
   polishing.value = true
   try {
-    const result = await polishVisualStyle(description, String(store.artStyle || '').trim())
+    const result = await polishVisualStyle(description, confirmedStyleAtRequest)
     const polished = String(result?.polished_style || '').trim()
     if (!polished) {
       throw new Error('整理结果为空，请重试')
+    }
+    if (
+      normalizedLocalStyle.value !== description
+      || String(store.artStyle || '').trim() !== confirmedStyleAtRequest
+    ) {
+      polishHint.value = '整理结果已返回，但你期间已经更新了风格输入，当前保留的是你的最新编辑。'
+      return
     }
     localStyle.value = polished
     onTextInput()

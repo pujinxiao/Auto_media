@@ -212,9 +212,11 @@ export const useStoryStore = defineStore('story', {
     totalTokens: (state) => state.usage.prompt_tokens + state.usage.completion_tokens,
   },
   actions: {
-    startNewStory(idea = '') {
+    startNewStory(idea = '', genre = '', tone = '') {
       this.$reset()
       this.input.idea = idea
+      this.input.genre = genre
+      this.input.tone = tone
       this.currentStep = 1
     },
     setManualPipelineContext({ projectId = '', pipelineId = '', storyId = '' } = {}) {

@@ -77,7 +77,7 @@ Video Generation
 ### 1. 克隆项目
 
 ```bash
-git clone <your-repo-url>
+git clone <your-repo-url> auto_media
 cd auto_media
 ```
 

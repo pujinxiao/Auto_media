@@ -1,5 +1,11 @@
-#!/usr/bin/env python3.12
-"""一键启动 AutoMedia 前后端"""
+#!/usr/bin/env python3
+"""AutoMedia 本地一键启动脚本。
+
+这个脚本面向第一次拉起项目的开发者，目标是尽量用一条命令完成：
+1. 检查 FFmpeg / FFprobe
+2. 安装前端依赖
+3. 启动后端和前端开发服务
+"""
 import os
 import platform
 import shlex
@@ -16,6 +22,7 @@ COMMON_BINARY_DIRS = (
     Path("/opt/local/bin"),
     Path.home() / ".local/bin",
 )
+PROJECT_BINARY_ROOT = ROOT / ".ffmpeg-tools" / "node_modules"
 
 
 def _binary_candidates(binary_name):
@@ -73,6 +80,22 @@ def build_runtime_env():
     return env
 
 
+def _find_project_binary(binary_name):
+    if not PROJECT_BINARY_ROOT.exists():
+        return None
+
+    for candidate_name in _binary_candidates(binary_name):
+        direct_candidate = PROJECT_BINARY_ROOT / candidate_name
+        if direct_candidate.is_file() and os.access(direct_candidate, os.X_OK):
+            return str(direct_candidate)
+
+        for candidate in sorted(PROJECT_BINARY_ROOT.glob(f"**/{candidate_name}")):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+
+    return None
+
+
 def resolve_binary(binary_name, env):
     def _is_executable_file(path: Path) -> bool:
         return path.is_file() and os.access(path, os.X_OK)
@@ -106,6 +129,10 @@ def resolve_binary(binary_name, env):
             candidate = directory / candidate_name
             if _is_executable_file(candidate):
                 return str(candidate)
+
+    project_binary = _find_project_binary(binary_name)
+    if project_binary:
+        return project_binary
 
     raise FileNotFoundError(f"未找到 {binary_name} 可执行文件")
 
@@ -167,6 +194,10 @@ def print_ffmpeg_help():
 
 
 def ensure_ffmpeg(env):
+    """确保当前运行环境可找到 ffmpeg / ffprobe。
+
+    若本机未安装，会在可行时尝试引导或自动安装，避免视频链路在运行后期才失败。
+    """
     try:
         ffmpeg_path = resolve_binary("ffmpeg", env)
         ffprobe_path = resolve_binary("ffprobe", env)
@@ -198,6 +229,10 @@ def setup_frontend(env):
 
 
 def start():
+    """启动本地开发环境。
+
+    后端使用 uvicorn 热更新，前端使用 Vite dev server。
+    """
     env = ensure_ffmpeg(build_runtime_env())
     setup_frontend(env)
 

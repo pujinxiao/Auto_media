@@ -201,9 +201,9 @@ watch([selectedGenreKey, customGenre], () => {
 
 function applyIdea(text) {
   idea.value = text
-  if (!rewriteHistory.value.length && !rewriteSnapshots.value.length) {
-    originalIdea.value = ''
-  }
+  rewriteHistory.value = []
+  rewriteSnapshots.value = []
+  originalIdea.value = ''
   clearRewriteFeedback()
 }
 

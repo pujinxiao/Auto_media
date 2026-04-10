@@ -1,6 +1,7 @@
 # ruff: noqa: RUF001
 
 import asyncio
+import json as _json
 import uuid
 from copy import deepcopy
 from typing import AsyncGenerator, Optional
@@ -486,9 +487,19 @@ async def mock_world_building_start(idea: str, genre: str = "", db: AsyncSession
     normalized_genre = str(genre or "").strip()
     question_text = f"如果按“{normalized_genre}”题材推进，故事更想落在哪个舞台？" if normalized_genre else q["text"]
     question = {"type": "options", "text": question_text, "options": q["options"], "dimension": q["dimension"]}
+    assistant_payload = {
+        "status": "questioning",
+        "question": {
+            "type": "options",
+            "text": question_text,
+            "options": q["options"],
+            "dimension": q["dimension"],
+        },
+        "world_summary": None,
+    }
     history = [
         {"role": "user", "content": f"种子想法：{idea}\n用户指定题材：{normalized_genre or '未指定'}\n\n请提出第一个世界观问题"},
-        {"role": "assistant", "content": f'{{"status":"questioning","question":{{"type":"options","text":"{question_text}","options":{q["options"]},"dimension":"{q["dimension"]}"}},"world_summary":null}}'},
+        {"role": "assistant", "content": _json.dumps(assistant_payload, ensure_ascii=False)},
     ]
     if db:
         await repo.save_story(db, story_id, {"idea": idea, "genre": normalized_genre, "wb_history": history, "wb_turn": 1})

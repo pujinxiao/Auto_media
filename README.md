@@ -74,14 +74,7 @@ Video Generation
 - `npm`
 - FFmpeg / FFprobe
 
-### 1. 克隆项目
-
-```bash
-git clone <your-repo-url> auto_media
-cd auto_media
-```
-
-### 2. 配置环境变量
+### 1. 配置环境变量
 
 ```bash
 cp .env.example .env
@@ -89,7 +82,7 @@ cp .env.example .env
 
 最少只需要准备你会用到的那组 API Key，不需要一次配满所有服务商。
 
-### 3. 一键启动
+### 2. 一键启动
 
 ```bash
 python3 start.py

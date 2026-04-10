@@ -61,6 +61,12 @@
 }
 .dim-input:focus {
   border-color: #6c63ff;
+}
+.dim-input:focus-visible {
+  outline: 2px solid #6c63ff;
+  outline-offset: 2px;
+}
+.dim-input:focus:not(:focus-visible) {
   outline: none;
 }
 .dim-note {
@@ -85,6 +91,10 @@
   transition: background 0.2s;
 }
 .random-all-btn:hover { background: #e0d9ff; }
+.random-all-btn:focus-visible {
+  outline: 2px solid #6c63ff;
+  outline-offset: 2px;
+}
 .gen-btn {
   flex: 1;
   padding: 9px;
@@ -99,6 +109,10 @@
 }
 .gen-btn:hover:not(:disabled) { background: #5a52e0; }
 .gen-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gen-btn:focus-visible {
+  outline: 2px solid #6c63ff;
+  outline-offset: 2px;
+}
 
 .preview {
   padding: 10px 14px;

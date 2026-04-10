@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""AutoMedia 本地一键启动脚本。
+"""AutoMedia 本地一键启动脚本.
 
-这个脚本面向第一次拉起项目的开发者，目标是尽量用一条命令完成：
+这个脚本面向第一次拉起项目的开发者, 目标是尽量用一条命令完成:
 1. 检查 FFmpeg / FFprobe
 2. 安装前端依赖
 3. 启动后端和前端开发服务
@@ -194,9 +194,9 @@ def print_ffmpeg_help():
 
 
 def ensure_ffmpeg(env):
-    """确保当前运行环境可找到 ffmpeg / ffprobe。
+    """确保当前运行环境可找到 ffmpeg / ffprobe.
 
-    若本机未安装，会在可行时尝试引导或自动安装，避免视频链路在运行后期才失败。
+    若本机未安装, 会在可行时尝试引导或自动安装, 避免视频链路在运行后期才失败.
     """
     try:
         ffmpeg_path = resolve_binary("ffmpeg", env)
@@ -229,9 +229,9 @@ def setup_frontend(env):
 
 
 def start():
-    """启动本地开发环境。
+    """启动本地开发环境.
 
-    后端使用 uvicorn 热更新，前端使用 Vite dev server。
+    后端使用 uvicorn 热更新, 前端使用 Vite dev server.
     """
     env = ensure_ffmpeg(build_runtime_env())
     setup_frontend(env)

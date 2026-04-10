@@ -9,7 +9,7 @@ function hasOutline(store) {
 }
 
 function hasWorldSummary(store) {
-  return !!store?.selectedSetting
+  return typeof store?.selectedSetting === 'string' && store.selectedSetting.trim().length > 0
 }
 
 function hasScript(store) {

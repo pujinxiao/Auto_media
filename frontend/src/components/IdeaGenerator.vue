@@ -134,6 +134,11 @@ function updateCustomGenre(value) {
   preview.value = ''
 }
 
+function pickRandomOption(options = []) {
+  if (!Array.isArray(options) || !options.length) return ''
+  return options[Math.floor(Math.random() * options.length)] || ''
+}
+
 function select(key, opt) {
   if (key === 'genre') {
     const next = props.selectedGenreKey === opt ? '' : opt
@@ -150,12 +155,13 @@ function select(key, opt) {
 function randomDim(dim) {
   if (dim.key === 'genre') {
     const available = dim.options.filter(opt => opt !== props.customGenreKey)
-    const opt = available[Math.floor(Math.random() * available.length)]
+    const opt = pickRandomOption(available)
     updateGenreKey(opt)
     updateCustomGenre('')
     return
   }
-  const opt = dim.options[Math.floor(Math.random() * dim.options.length)]
+  const opt = pickRandomOption(dim.options)
+  if (!opt) return
   selected.value = { ...selected.value, [dim.key]: opt }
   preview.value = ''
 }
@@ -165,12 +171,13 @@ function randomAll() {
   for (const dim of dimensions.value) {
     if (dim.key === 'genre') {
       const available = dim.options.filter(opt => opt !== props.customGenreKey)
-      const opt = available[Math.floor(Math.random() * available.length)]
+      const opt = pickRandomOption(available)
       updateGenreKey(opt)
       updateCustomGenre('')
       continue
     }
-    next[dim.key] = dim.options[Math.floor(Math.random() * dim.options.length)]
+    const opt = pickRandomOption(dim.options)
+    if (opt) next[dim.key] = opt
   }
   selected.value = next
   preview.value = ''

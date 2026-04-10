@@ -115,7 +115,9 @@ const selected = ref({})
 const preview = ref('')
 
 const isGenreValid = computed(() => props.selectedGenreKey !== props.customGenreKey || Boolean(props.customGenre.trim()))
-const canGenerate = computed(() => Object.keys(selected.value).length >= 3 && isGenreValid.value)
+const canGenerate = computed(() => (
+  Object.keys(selected.value).length + (props.selectedGenreKey && isGenreValid.value ? 1 : 0)
+) >= 3)
 
 function getSelectedValue(key) {
   if (key === 'genre') return props.selectedGenreKey
@@ -139,7 +141,6 @@ function select(key, opt) {
     if (next !== props.customGenreKey) {
       updateCustomGenre('')
     }
-    preview.value = ''
     return
   }
   selected.value = { ...selected.value, [key]: opt }
@@ -152,7 +153,6 @@ function randomDim(dim) {
     const opt = available[Math.floor(Math.random() * available.length)]
     updateGenreKey(opt)
     updateCustomGenre('')
-    preview.value = ''
     return
   }
   const opt = dim.options[Math.floor(Math.random() * dim.options.length)]
@@ -181,6 +181,8 @@ function generate() {
   const s = selected.value
   const leadParts = []
   const detailParts = []
+  // Genre is synced from Step1Inspire via props, so selected.value only stores
+  // the non-genre dimensions and getSelectedValue('genre') reads from props.
 
   if (s.character && s.era) {
     leadParts.push(`${s.era}里的${s.character}`)

@@ -14,6 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 12):
+    raise SystemExit("AutoMedia requires Python 3.12 or higher")
+
 ROOT = Path(__file__).parent
 FRONTEND = ROOT / "frontend"
 COMMON_BINARY_DIRS = (

@@ -1221,10 +1221,28 @@ async def rewrite_idea(
 
     response_text = resp.choices[0].message.content
     usage = getattr(resp, "usage", None)
+    data: dict[str, Any] = {}
+    guardrail_notice = ""
+    parsed_successfully = False
     try:
-        data = _parse_json(response_text)
+        parsed = _parse_json(response_text)
+        if not isinstance(parsed, dict):
+            raise ValueError("灵感改写响应不是 JSON 对象")
+        data = parsed
         rewritten_idea = _normalize_rewrite_text(data.get("rewritten_idea"))
         rewrite_reason = str(data.get("rewrite_reason") or "").strip()
+        guardrail_notice = str(data.get("guardrail_notice") or "").strip()
+        parsed_successfully = True
+    except Exception as exc:
+        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        rewritten_idea, rewrite_reason = _build_fallback_rewrite_result(
+            original_idea=normalized_original,
+            current_idea=normalized_current,
+            instruction=normalized_instruction,
+            genre=normalized_genre,
+        )
+
+    try:
         if not rewritten_idea:
             rewritten_idea, fallback_reason = _build_fallback_rewrite_result(
                 original_idea=normalized_original,
@@ -1253,16 +1271,18 @@ async def rewrite_idea(
         if not rewritten_idea:
             raise ValueError("灵感改写结果为空")
     except Exception as exc:
-        tracker.record_failure(exc, usage=usage, response_text=response_text)
+        if parsed_successfully:
+            tracker.record_failure(exc, usage=usage, response_text=response_text)
         raise
 
-    tracker.record_success(usage=usage, response_text=response_text)
+    if parsed_successfully:
+        tracker.record_success(usage=usage, response_text=response_text)
     return {
         "original_idea": normalized_original,
         "current_idea": normalized_current,
         "instruction": normalized_instruction,
         "round": round_number,
-        "guardrail_notice": str(data.get("guardrail_notice") or "").strip(),
+        "guardrail_notice": guardrail_notice,
         "rewritten_idea": rewritten_idea,
         "rewrite_reason": rewrite_reason,
         "usage": _usage_dict(usage),

@@ -218,9 +218,9 @@ export const useStoryStore = defineStore('story', {
   actions: {
     startNewStory(idea = '', genre = '', tone = '') {
       this.$reset()
-      this.input.idea = idea
-      this.input.genre = genre
-      this.input.tone = tone
+      this.input.idea = normalizeOptionalText(idea)
+      this.input.genre = normalizeOptionalText(genre)
+      this.input.tone = normalizeOptionalText(tone)
       this.currentStep = 1
     },
     setManualPipelineContext({ projectId = '', pipelineId = '', storyId = '' } = {}) {

@@ -100,7 +100,7 @@ python3 start.py
 - 前端：`http://localhost:5173`
 - 后端：`http://localhost:8000`
 
-### 4. 手动启动
+### 3. 手动启动
 
 如果你希望前后端分开跑，可以这样启动：
 

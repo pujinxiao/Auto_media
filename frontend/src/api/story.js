@@ -235,7 +235,7 @@ export async function worldBuildingStart(idea, genre = '') {
     headers: getHeaders(),
     body: JSON.stringify({ idea, genre }),
   })
-  if (!res.ok) throw new Error(`请求失败 (${res.status})`)
+  if (!res.ok) throw new Error(await readErrorDetail(res, `请求失败 (${res.status})`))
   return res.json()
 }
 
